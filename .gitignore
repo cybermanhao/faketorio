@@ -1,0 +1,11 @@
+# Godot
+game/.godot/
+*.uid
+
+# .NET
+bin/
+obj/
+*.user
+
+# Misc
+.weixin-sync-buf.json
