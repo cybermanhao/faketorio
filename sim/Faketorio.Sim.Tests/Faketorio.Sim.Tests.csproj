@@ -22,4 +22,8 @@
     <ProjectReference Include="..\Faketorio.Sim\Faketorio.Sim.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\data\**" CopyToOutputDirectory="PreserveNewest" LinkBase="data" />
+  </ItemGroup>
+
 </Project>

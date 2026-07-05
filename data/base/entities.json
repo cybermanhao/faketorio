@@ -1,0 +1,4 @@
+[
+  { "type": "container", "name": "wooden-chest", "tileWidth": 1, "tileHeight": 1,
+    "inventorySize": 16, "minableResult": "wooden-chest", "miningTimeSeconds": 0.5 }
+]

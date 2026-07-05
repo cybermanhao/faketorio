@@ -1,0 +1,5 @@
+[
+  { "type": "recipe", "name": "iron-plate", "category": "smelting", "energyRequiredSeconds": 3.2,
+    "ingredients": [ { "name": "iron-ore", "amount": 1 } ],
+    "results": [ { "name": "iron-plate", "amount": 1 } ] }
+]

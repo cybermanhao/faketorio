@@ -1,0 +1,6 @@
+[
+  { "type": "item", "name": "iron-ore", "stackSize": 50 },
+  { "type": "item", "name": "iron-plate", "stackSize": 100 },
+  { "type": "item", "name": "coal", "stackSize": 50, "fuelValue": "4MJ", "fuelCategory": "chemical" },
+  { "type": "item", "name": "wooden-chest", "stackSize": 50, "placeResult": "wooden-chest" }
+]
