@@ -1,0 +1,16 @@
+namespace Faketorio.Sim.Commands;
+
+public enum CommandType : byte
+{
+    PlaceEntity = 1,
+    RemoveEntity = 2,
+}
+
+public struct Command
+{
+    public CommandType Type;
+    public int ProtoId;
+    public int X;
+    public int Y;
+    public byte Rotation; // 0/1/2/3 = 北/东/南/西
+}
