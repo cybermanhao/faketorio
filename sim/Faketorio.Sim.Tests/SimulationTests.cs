@@ -80,4 +80,34 @@ public class SimulationTests
         sim.Step();
         Assert.Equal(1, sim.RejectedCommandCount);
     }
+
+    [Fact]
+    public void PlaceEntity_WithOutOfRangeProtoId_IsRejected()
+    {
+        var sim = NewSim();
+        sim.Submit(new Command
+        {
+            Type = CommandType.PlaceEntity,
+            ProtoId = int.MaxValue, // Out of range
+            X = 0, Y = 0, Rotation = 0,
+        });
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
+    }
+
+    [Fact]
+    public void PlaceEntity_WithNegativeProtoId_IsRejected()
+    {
+        var sim = NewSim();
+        sim.Submit(new Command
+        {
+            Type = CommandType.PlaceEntity,
+            ProtoId = -1, // Negative ID
+            X = 0, Y = 0, Rotation = 0,
+        });
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
+    }
 }

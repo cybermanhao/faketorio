@@ -34,7 +34,7 @@ public sealed class Simulation
         {
             case CommandType.PlaceEntity:
             {
-                if (Prototypes.GetById(command.ProtoId) is not EntityPrototype proto
+                if (!Prototypes.TryGetById(command.ProtoId, out var p) || p is not EntityPrototype proto
                     || !World.IsAreaFree(command.X, command.Y, proto.TileWidth, proto.TileHeight))
                 {
                     RejectedCommandCount++;
@@ -59,7 +59,11 @@ public sealed class Simulation
                     return;
                 }
                 ref var data = ref Entities.Get(id);
-                var proto = (EntityPrototype)Prototypes.GetById(data.ProtoId);
+                if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not EntityPrototype proto)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
                 World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
                 Entities.Destroy(id);
                 return;

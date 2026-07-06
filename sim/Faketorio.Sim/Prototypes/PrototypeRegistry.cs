@@ -46,4 +46,15 @@ public sealed class PrototypeRegistry
     }
 
     public PrototypeBase GetById(int id) => _byId[id];
+
+    public bool TryGetById(int id, out PrototypeBase proto)
+    {
+        if (id >= 0 && id < _byId.Count)
+        {
+            proto = _byId[id];
+            return true;
+        }
+        proto = null!;
+        return false;
+    }
 }
