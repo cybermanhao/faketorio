@@ -1,6 +1,7 @@
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Prototypes;
+using Faketorio.Sim.State;
 using Faketorio.Sim.World;
 
 namespace Faketorio.Sim;
@@ -26,6 +27,45 @@ public sealed class Simulation
             Apply(in commands[i]);
         // 后续计划在此追加系统更新(传送带、机器、电网……)
         Tick++;
+    }
+
+    public ulong ComputeStateHash()
+    {
+        var writer = new Fnv1aHashWriter();
+        WriteState(writer);
+        return writer.Hash;
+    }
+
+    public void WriteState(IStateWriter writer)
+    {
+        writer.Write(Tick);
+        writer.Write(RejectedCommandCount);
+
+        // 实体池:按索引序(确定)
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            writer.Write(i);
+            writer.Write(Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.GetAtIndex(i);
+            writer.Write(data.ProtoId);
+            writer.Write(data.X);
+            writer.Write(data.Y);
+            writer.Write(data.Rotation);
+        }
+
+        // 世界网格:chunk 按键序(确定)
+        var keys = World.SortedChunkKeys();
+        for (int k = 0; k < keys.Count; k++)
+        {
+            writer.Write(keys[k]);
+            var tiles = World.GetChunkByKey(keys[k]).Tiles;
+            for (int i = 0; i < tiles.Length; i++)
+            {
+                writer.Write(tiles[i].Index);
+                writer.Write(tiles[i].Generation);
+            }
+        }
     }
 
     private void Apply(in Command command)
