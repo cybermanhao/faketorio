@@ -16,6 +16,13 @@ public class SimulationTests
         X = x, Y = y, Rotation = 0,
     };
 
+    private static Command PlaceLargeChest(Simulation sim, int x, int y) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<ContainerPrototype>("large-chest").Id,
+        X = x, Y = y, Rotation = 0,
+    };
+
     [Fact]
     public void Command_NotAppliedUntilNextStep()
     {
@@ -94,6 +101,29 @@ public class SimulationTests
         sim.Step();
         Assert.Equal(1, sim.RejectedCommandCount);
         Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
+    }
+
+    [Fact]
+    public void MultiTileEntity_PlacementAndRemoval_CoversFullFootprintAcrossChunks()
+    {
+        var sim = NewSim();
+        const int x = -33, y = -33; // 2x3 footprint straddles all four neighboring chunks (ChunkSize=32)
+        sim.Submit(PlaceLargeChest(sim, x, y));
+        sim.Step();
+
+        var id = sim.World.GetEntityAt(x, y);
+        Assert.True(id.IsValid);
+        for (int dy = 0; dy < 3; dy++)
+            for (int dx = 0; dx < 2; dx++)
+                Assert.Equal(id, sim.World.GetEntityAt(x + dx, y + dy));
+
+        // 移除命令可以指向占地内任意一格,不要求是原点
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = x + 1, Y = y + 2 });
+        sim.Step();
+
+        for (int dy = 0; dy < 3; dy++)
+            for (int dx = 0; dx < 2; dx++)
+                Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(x + dx, y + dy));
     }
 
     [Fact]
