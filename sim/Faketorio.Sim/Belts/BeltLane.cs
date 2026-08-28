@@ -83,4 +83,21 @@ public sealed class BeltLane
         }
         _openIndex = Math.Min(i, _gaps.Count - 1);
     }
+
+    // 队首物品是否已经贴到出口(gap 为 0),可以移交给下游(传送带/机械
+    // 臂/建筑输入口——移交逻辑本身在后续接入 Simulation 的计划中实现)。
+    public bool IsFrontReady => _gaps.Count > 0 && _gaps[0] == 0;
+
+    // 移除队首物品(调用前必须已确认 IsFrontReady)。它腾出的空间并入新
+    // 队首的前方 gap;_openIndex 重置为 0,因为后面的物品可能因此重新有
+    // 空间前进。
+    public void RemoveFront()
+    {
+        if (!IsFrontReady)
+            throw new InvalidOperationException("RemoveFront called when front is not ready");
+        _gaps.RemoveAt(0);
+        if (_gaps.Count > 0)
+            _gaps[0] += ItemWidthSubTiles;
+        _openIndex = 0;
+    }
 }

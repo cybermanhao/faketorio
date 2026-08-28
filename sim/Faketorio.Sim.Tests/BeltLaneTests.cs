@@ -146,4 +146,73 @@ public class BeltLaneTests
         lane.TryInsertAtBack();
         Assert.Throws<ArgumentOutOfRangeException>(() => lane.Advance(-1));
     }
+
+    [Fact]
+    public void IsFrontReady_FalseWhenEmpty()
+    {
+        var lane = new BeltLane(256);
+        Assert.False(lane.IsFrontReady);
+    }
+
+    [Fact]
+    public void IsFrontReady_FalseWhenFrontGapNotYetZero()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(); // gaps=[192]
+        Assert.False(lane.IsFrontReady);
+    }
+
+    [Fact]
+    public void IsFrontReady_TrueWhenFrontGapReachesZero()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();
+        lane.Advance(1000);
+        Assert.True(lane.IsFrontReady);
+    }
+
+    [Fact]
+    public void RemoveFront_WhenNotReady_Throws()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(); // gaps=[192],队首还没到出口
+        Assert.Throws<InvalidOperationException>(() => lane.RemoveFront());
+    }
+
+    [Fact]
+    public void RemoveFront_FreesSpaceIntoNewFrontGap()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();  // gaps=[192]
+        lane.Advance(100);        // gaps=[92]
+        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.Advance(110);        // gaps=[0,18]
+        lane.RemoveFront();
+        Assert.Equal(1, lane.Count);
+        Assert.Equal(new[] { 82 }, lane.Gaps); // 18 + 64(被移除物品腾出的槽宽)
+    }
+
+    [Fact]
+    public void RemoveFront_WhenLastItem_LeavesLaneEmpty()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();
+        lane.Advance(1000);
+        lane.RemoveFront();
+        Assert.Equal(0, lane.Count);
+        Assert.False(lane.IsFrontReady);
+    }
+
+    [Fact]
+    public void RemoveFront_ResetsCursorSoTrailingItemsCanAdvanceOnNextTick()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();  // gaps=[192]
+        lane.Advance(100);        // gaps=[92]
+        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.Advance(110);        // gaps=[0,18]
+        lane.RemoveFront();       // gaps=[82]
+        lane.Advance(30);         // 原来的第二个物品现在向出口前进
+        Assert.Equal(new[] { 52 }, lane.Gaps); // 82-30
+    }
 }
