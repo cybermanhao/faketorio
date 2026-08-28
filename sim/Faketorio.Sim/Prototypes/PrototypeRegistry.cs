@@ -20,7 +20,7 @@ public sealed class PrototypeRegistry
         var all = new List<PrototypeBase>(_byTypeAndName.Values);
         all.Sort(static (a, b) =>
         {
-            int c = string.CompareOrdinal(a.GetType().Name, b.GetType().Name);
+            int c = string.CompareOrdinal(a.GetType().FullName, b.GetType().FullName);
             return c != 0 ? c : string.CompareOrdinal(a.Name, b.Name);
         });
         _byId.Clear();
