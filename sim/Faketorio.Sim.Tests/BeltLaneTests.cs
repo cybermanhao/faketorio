@@ -148,6 +148,17 @@ public class BeltLaneTests
     }
 
     [Fact]
+    public void Advance_UnblockedMultiItem_OnlyMovesFrontGap()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();  // gaps=[192]
+        lane.Advance(100);        // gaps=[92]
+        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.Advance(10);         // 前方 gap 未压缩到 0,不应级联touch第二个 gap
+        Assert.Equal(new[] { 82, 36 }, lane.Gaps);
+    }
+
+    [Fact]
     public void IsFrontReady_FalseWhenEmpty()
     {
         var lane = new BeltLane(256);

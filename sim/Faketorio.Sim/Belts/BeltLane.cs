@@ -65,6 +65,13 @@ public sealed class BeltLane
     // 让这条 lane 上的物品流前进最多 speed 个亚格。
     // 只触碰 _gaps[_openIndex..] 中被实际消耗到 0 的那些下标,其余原样
     // 保留——这就是 FFF-176 描述的摊还 O(1) 更新。
+    //
+    // 重要:任何在本次调用中未能消耗完的 speed 预算(例如到达 _gaps 尾端
+    // 时仍有剩余)会被丢弃,不会向下游移交(未来接入的、与后续 lane 的交
+    // 接逻辑可能会改变这一点)。这意味着为避免系统性吞吐率衰减,调用者选
+    // 择的 speed 值应当整除 ItemWidthSubTiles(64);否则当某个物品的前沿 gap
+    // 恰好在本次调用中压缩到 0 且仍有余速,但 _gaps 列表已耗尽时,那个余
+    // 速会被遗弃,导致每个 tick 累积一个小缺口。
     public void Advance(int speed)
     {
         TouchesInLastAdvance = 0;

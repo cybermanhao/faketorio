@@ -578,7 +578,7 @@ Expected: 7 passed(既有 6 个 + 本任务新增 1 个)
 - [ ] **Step 7: 全量回归**
 
 Run: `dotnet test C:\code\faketorio\Faketorio.sln`
-Expected: 59 passed, 0 failed(M1 Plan 1 的 40 个 + 本计划 Task 1-3 新增的 18 个 `BeltLaneTests` + Task 4 新增的 1 个 `LoadsTransportBeltWithSpeed`)
+Expected: 61 passed, 0 failed(M1 Plan 1 的 40 个 + 本计划 Task 1-3 及其修复轮次新增的 20 个 `BeltLaneTests` + Task 4 新增的 1 个 `LoadsTransportBeltWithSpeed`)
 
 - [ ] **Step 8: Commit**
 
