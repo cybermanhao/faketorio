@@ -19,6 +19,11 @@ public sealed class BeltLane
     private readonly List<int> _gaps = new();
     private readonly int _lineLengthSubTiles;
 
+    // 第一个"可能仍未压缩到 0"的下标;之前的下标已确认为 0,Advance 不再
+    // 重新扫描它们——这就是摊还 O(1) 的关键。只有 RemoveFront(Task 3)
+    // 会把它重置回 0。
+    private int _openIndex;
+
     public BeltLane(int lineLengthSubTiles)
     {
         if (lineLengthSubTiles < ItemWidthSubTiles)
@@ -48,5 +53,24 @@ public sealed class BeltLane
         if (free < ItemWidthSubTiles) return false;
         _gaps.Add(free - ItemWidthSubTiles);
         return true;
+    }
+
+    // 让这条 lane 上的物品流前进最多 speed 个亚格。
+    // 只触碰 _gaps[_openIndex..] 中被实际消耗到 0 的那些下标,其余原样
+    // 保留——这就是 FFF-176 描述的摊还 O(1) 更新。
+    public void Advance(int speed)
+    {
+        if (_gaps.Count == 0) return;
+        int remaining = speed;
+        int i = _openIndex;
+        while (remaining > 0 && i < _gaps.Count)
+        {
+            int consume = Math.Min(remaining, _gaps[i]);
+            _gaps[i] -= consume;
+            remaining -= consume;
+            if (_gaps[i] > 0) break;
+            i++;
+        }
+        _openIndex = Math.Min(i, _gaps.Count - 1);
     }
 }
