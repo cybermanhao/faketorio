@@ -573,7 +573,7 @@ public sealed class TransportBeltPrototype : EntityPrototype
 - [ ] **Step 6: 运行确认通过**
 
 Run: `dotnet test C:\code\faketorio\Faketorio.sln --filter "FullyQualifiedName~PrototypeLoaderTests"`
-Expected: 6 passed(既有 5 个 + 本任务新增 1 个)
+Expected: 7 passed(既有 6 个 + 本任务新增 1 个)
 
 - [ ] **Step 7: 全量回归**
 
