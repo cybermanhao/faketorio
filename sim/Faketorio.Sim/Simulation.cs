@@ -41,7 +41,10 @@ public sealed class Simulation
         writer.Write(Tick);
         writer.Write(RejectedCommandCount);
 
-        // 实体池:按索引序(确定)
+        // 实体池分配器簿记(高水位/空闲栈/全部代数):恢复后 Create() 分配顺序需一致
+        Entities.WriteState(writer);
+
+        // 实体池:按索引序(确定)——存活实体的内容数据(与上面的分配器簿记是两回事)
         for (int i = 0; i < Entities.Capacity; i++)
         {
             if (!Entities.IsAliveAtIndex(i)) continue;

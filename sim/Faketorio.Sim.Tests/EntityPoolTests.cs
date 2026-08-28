@@ -1,4 +1,5 @@
 using Faketorio.Sim.Entities;
+using Faketorio.Sim.State;
 
 namespace Faketorio.Sim.Tests;
 
@@ -53,5 +54,30 @@ public class EntityPoolTests
         for (int i = 0; i < 100; i++)
             pool.Create(new Dummy { Value = i });
         Assert.True(pool.Capacity >= 100);
+    }
+
+    private static ulong Hash(EntityPool<Dummy> pool)
+    {
+        var writer = new Fnv1aHashWriter();
+        pool.WriteState(writer);
+        return writer.Hash;
+    }
+
+    [Fact]
+    public void WriteState_IsStableThenChangesWhenAllocatorStateChanges()
+    {
+        var pool = new EntityPool<Dummy>();
+        var a = pool.Create(new Dummy { Value = 1 });
+        var b = pool.Create(new Dummy { Value = 2 });
+        pool.Destroy(a); // 填充空闲栈,推进死槽代数
+        pool.Destroy(b);
+
+        var hash1 = Hash(pool);
+        var hash2 = Hash(pool); // 同一实例,无改动:必须稳定
+        Assert.Equal(hash1, hash2);
+
+        pool.Create(new Dummy { Value = 3 }); // 弹出空闲栈:_freeCount 与该槽代数都会变
+        var hash3 = Hash(pool);
+        Assert.NotEqual(hash1, hash3);
     }
 }

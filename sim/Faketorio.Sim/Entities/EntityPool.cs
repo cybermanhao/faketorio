@@ -1,3 +1,5 @@
+using Faketorio.Sim.State;
+
 namespace Faketorio.Sim.Entities;
 
 // SoA 风格实体池:数据连续存储,代数 ID 防悬垂引用(spec 5.1)。
@@ -59,6 +61,18 @@ public sealed class EntityPool<T> where T : struct
     public bool IsAliveAtIndex(int index) => (_generations[index] & 1) == 1;
     public ref T GetAtIndex(int index) => ref _data[index];
     public int GenerationAtIndex(int index) => _generations[index];
+
+    // 分配器自身的簿记(高水位/空闲栈/全部代数,含死槽)必须可写,
+    // 否则从存档恢复后 Create() 会分配出与原始运行不同的 EntityId(spec 铁律 4)。
+    public void WriteState(IStateWriter writer)
+    {
+        writer.Write(_count);
+        for (int i = 0; i < _count; i++)
+            writer.Write(_generations[i]);
+        writer.Write(_freeCount);
+        for (int i = 0; i < _freeCount; i++)
+            writer.Write(_freeStack[i]);
+    }
 
     private void Grow()
     {
