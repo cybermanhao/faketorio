@@ -36,6 +36,13 @@ public sealed class BeltLane
     // 仅供测试内省:前到后的 gap 列表,_gaps[0] = 出口到最前物品的距离。
     public IReadOnlyList<int> Gaps => _gaps;
 
+    // 仅供测试内省:最近一次 Advance 调用中,内部循环实际迭代的次数。用
+    // 来验证摊还 O(1) 的声明——如果 _openIndex 缓存真的生效,稳定堵塞
+    // 状态下这个值应恒为 1(只看一眼已知为 0 的那个下标就退出),不会随
+    // _gaps.Count 增长;这样才能把"缓存下标"实现和"每次从头重新扫描"
+    // 的朴素实现区分开(两者的最终 Gaps 数值可能完全一样)。
+    public int TouchesInLastAdvance { get; private set; }
+
     // 队尾(入口侧)剩余的空闲亚格数——最后一个物品之后到 line 尾端的空间。
     private int BackFreeSubTiles()
     {
@@ -60,11 +67,14 @@ public sealed class BeltLane
     // 保留——这就是 FFF-176 描述的摊还 O(1) 更新。
     public void Advance(int speed)
     {
+        TouchesInLastAdvance = 0;
+        if (speed < 0) throw new ArgumentOutOfRangeException(nameof(speed));
         if (_gaps.Count == 0) return;
         int remaining = speed;
         int i = _openIndex;
         while (remaining > 0 && i < _gaps.Count)
         {
+            TouchesInLastAdvance++;
             int consume = Math.Min(remaining, _gaps[i]);
             _gaps[i] -= consume;
             remaining -= consume;

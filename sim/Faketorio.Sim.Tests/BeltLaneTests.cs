@@ -117,4 +117,33 @@ public class BeltLaneTests
         Assert.All(lane.Gaps, g => Assert.True(g >= 0));
         Assert.Equal(0, lane.Gaps[0]); // 完全压缩到出口
     }
+
+    [Fact]
+    public void Advance_CursorStaysO1InBlockedSteadyState_NotFrontRescan()
+    {
+        var lane = new BeltLane(256);
+        // 装满 4 个物品(256/64),让它们尽量往前推,形成完全堵塞状态。
+        for (int i = 0; i < 4; i++)
+        {
+            lane.TryInsertAtBack();
+            lane.Advance(1000);
+        }
+        Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
+
+        // 稳定堵塞状态下,重复调用 Advance 每次只应做 1 次循环迭代——
+        // 如果实现退化成"每次都从下标 0 重新扫描",这里会是 4(或更多),
+        // 而不是 1。
+        lane.Advance(7);
+        Assert.Equal(1, lane.TouchesInLastAdvance);
+        lane.Advance(7);
+        Assert.Equal(1, lane.TouchesInLastAdvance);
+    }
+
+    [Fact]
+    public void Advance_WithNegativeSpeed_Throws()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();
+        Assert.Throws<ArgumentOutOfRangeException>(() => lane.Advance(-1));
+    }
 }
