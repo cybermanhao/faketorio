@@ -51,6 +51,13 @@ public static class PrototypeLoader
                 MiningTimeTicks = Units.SecondsToTicks(GetDouble(el, "miningTimeSeconds", 0)),
                 InventorySize = GetInt(el, "inventorySize", 0),
             }),
+            "transport-belt" => ValidateFootprint(new TransportBeltPrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                SpeedSubTilesPerTick = GetInt(el, "speedSubTilesPerTick", 0),
+            }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
     }

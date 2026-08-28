@@ -55,6 +55,15 @@ public class PrototypeLoaderTests
     }
 
     [Fact]
+    public void LoadsTransportBeltWithSpeed()
+    {
+        var belt = Load().Get<TransportBeltPrototype>("transport-belt-basic");
+        Assert.Equal(8, belt.SpeedSubTilesPerTick);
+        Assert.Equal(1, belt.TileWidth);
+        Assert.Equal(1, belt.TileHeight);
+    }
+
+    [Fact]
     public void ZeroTileWidthThrows()
     {
         var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

@@ -2,5 +2,7 @@
   { "type": "container", "name": "wooden-chest", "tileWidth": 1, "tileHeight": 1,
     "inventorySize": 16, "minableResult": "wooden-chest", "miningTimeSeconds": 0.5 },
   { "type": "container", "name": "large-chest", "tileWidth": 2, "tileHeight": 3,
-    "inventorySize": 48, "minableResult": "large-chest", "miningTimeSeconds": 1.0 }
+    "inventorySize": 48, "minableResult": "large-chest", "miningTimeSeconds": 1.0 },
+  { "type": "transport-belt", "name": "transport-belt-basic", "tileWidth": 1, "tileHeight": 1,
+    "speedSubTilesPerTick": 8 }
 ]
