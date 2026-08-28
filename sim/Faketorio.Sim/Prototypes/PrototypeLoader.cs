@@ -42,7 +42,7 @@ public static class PrototypeLoader
                 Results = ParseAmounts(el.GetProperty("results")),
                 Enabled = !el.TryGetProperty("enabled", out var en) || en.GetBoolean(),
             },
-            "container" => new ContainerPrototype
+            "container" => ValidateFootprint(new ContainerPrototype
             {
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
@@ -50,9 +50,20 @@ public static class PrototypeLoader
                 MinableResult = GetString(el, "minableResult"),
                 MiningTimeTicks = Units.SecondsToTicks(GetDouble(el, "miningTimeSeconds", 0)),
                 InventorySize = GetInt(el, "inventorySize", 0),
-            },
+            }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
+    }
+
+    // 占地为 0(或负)的实体会通过 IsAreaFree/OccupyArea 的空循环"合法"放置,
+    // 却不占任何 tile,导致 RemoveEntity 永远找不到它——数据加载期直接拒绝。
+    private static T ValidateFootprint<T>(T proto) where T : EntityPrototype
+    {
+        if (proto.TileWidth <= 0 || proto.TileHeight <= 0)
+            throw new InvalidDataException(
+                $"Entity prototype '{proto.Name}' has non-positive footprint " +
+                $"(tileWidth={proto.TileWidth}, tileHeight={proto.TileHeight})");
+        return proto;
     }
 
     private static List<ItemAmount> ParseAmounts(JsonElement arr)

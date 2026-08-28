@@ -53,4 +53,14 @@ public class PrototypeLoaderTests
         File.WriteAllText(Path.Combine(dir, "bad.json"), "[{ \"type\": \"nonsense\", \"name\": \"x\" }]");
         Assert.Throws<InvalidDataException>(() => PrototypeLoader.LoadFromDirectory(dir));
     }
+
+    [Fact]
+    public void ZeroTileWidthThrows()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "bad.json"),
+            "[{ \"type\": \"container\", \"name\": \"broken-chest\", \"tileWidth\": 0, \"tileHeight\": 1 }]");
+        Assert.Throws<InvalidDataException>(() => PrototypeLoader.LoadFromDirectory(dir));
+    }
 }
