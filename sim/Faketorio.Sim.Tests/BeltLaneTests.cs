@@ -226,4 +226,25 @@ public class BeltLaneTests
         lane.Advance(30);         // 原来的第二个物品现在向出口前进
         Assert.Equal(new[] { 52 }, lane.Gaps); // 82-30
     }
+
+    [Fact]
+    public void ExtendBack_GrowsBackCapacityWithoutMovingItems()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();               // gaps=[192],队尾已满
+        Assert.False(lane.TryInsertAtBack()); // 延长前没有空间
+
+        lane.ExtendBack(256);                 // line 现在长 512
+
+        Assert.Equal(new[] { 192 }, lane.Gaps);       // 最前物品没有移动
+        Assert.True(lane.TryInsertAtBack());           // 队尾腾出了空间
+        Assert.Equal(new[] { 192, 192 }, lane.Gaps);  // 512 - (192+64) - 64 = 192
+    }
+
+    [Fact]
+    public void ExtendBack_NegativeSubtiles_Throws()
+    {
+        var lane = new BeltLane(256);
+        Assert.Throws<ArgumentOutOfRangeException>(() => lane.ExtendBack(-1));
+    }
 }

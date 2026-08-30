@@ -17,7 +17,7 @@ public sealed class BeltLane
     // _gaps[0] = 出口到最前物品前沿的距离;
     // _gaps[i](i>0) = 物品 i-1 后沿到物品 i 前沿的距离。
     private readonly List<int> _gaps = new();
-    private readonly int _lineLengthSubTiles;
+    private int _lineLengthSubTiles;
 
     // 第一个"可能仍未压缩到 0"的下标;之前的下标已确认为 0,Advance 不再
     // 重新扫描它们——这就是摊还 O(1) 的关键。只有 RemoveFront(Task 3)
@@ -106,5 +106,14 @@ public sealed class BeltLane
         if (_gaps.Count > 0)
             _gaps[0] += ItemWidthSubTiles;
         _openIndex = 0;
+    }
+
+    // 把入口端向外延长 subtiles 个亚格(并入队尾方向的相邻线段)。
+    // 只增加可用总长,不触碰任何 gap——BackFreeSubTiles 的公式自动反映新
+    // 长度,已有物品到出口的距离不变。
+    public void ExtendBack(int subtiles)
+    {
+        if (subtiles < 0) throw new ArgumentOutOfRangeException(nameof(subtiles));
+        _lineLengthSubTiles += subtiles;
     }
 }
