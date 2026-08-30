@@ -116,4 +116,16 @@ public sealed class BeltLane
         if (subtiles < 0) throw new ArgumentOutOfRangeException(nameof(subtiles));
         _lineLengthSubTiles += subtiles;
     }
+
+    // 把出口端向外延长 subtiles 个亚格(并入出口方向的相邻线段)。
+    // 出口整体外移,所以最前物品到新出口的距离要相应增大:gaps[0] += subtiles。
+    // 同时把内部游标重置为 0——原本压缩到 0 的最前 gap 现在重新有了空间,
+    // 游标若停在它后面会导致最前物品永远不向新出口前进。
+    public void ExtendFront(int subtiles)
+    {
+        if (subtiles < 0) throw new ArgumentOutOfRangeException(nameof(subtiles));
+        _lineLengthSubTiles += subtiles;
+        if (_gaps.Count > 0) _gaps[0] += subtiles;
+        _openIndex = 0;
+    }
 }

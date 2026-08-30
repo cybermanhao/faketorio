@@ -247,4 +247,44 @@ public class BeltLaneTests
         var lane = new BeltLane(256);
         Assert.Throws<ArgumentOutOfRangeException>(() => lane.ExtendBack(-1));
     }
+
+    [Fact]
+    public void ExtendFront_PushesExitOutwardAndEnlargesFrontGap()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack();   // gaps=[192]
+        lane.ExtendFront(256);    // 出口离物品又远了 256
+        Assert.Equal(new[] { 448 }, lane.Gaps);
+    }
+
+    [Fact]
+    public void ExtendFront_OnEmptyLane_JustGrowsLength()
+    {
+        var lane = new BeltLane(256);
+        lane.ExtendFront(256);
+        Assert.Equal(0, lane.Count);
+        Assert.True(lane.TryInsertAtBack());       // 现在长 512
+        Assert.Equal(new[] { 448 }, lane.Gaps);   // 512 - 64
+    }
+
+    [Fact]
+    public void ExtendFront_ResetsCursorSoBlockedFrontItemAdvancesIntoNewSpace()
+    {
+        var lane = new BeltLane(256);
+        // 装满并完全压缩:gaps=[0,0,0,0],内部游标停在末尾
+        for (int i = 0; i < 4; i++) { lane.TryInsertAtBack(); lane.Advance(1000); }
+        Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
+
+        lane.ExtendFront(64);   // gaps=[64,0,0,0]
+        lane.Advance(64);       // 队首必须能走进新腾出的 64
+
+        Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
+    }
+
+    [Fact]
+    public void ExtendFront_NegativeSubtiles_Throws()
+    {
+        var lane = new BeltLane(256);
+        Assert.Throws<ArgumentOutOfRangeException>(() => lane.ExtendFront(-1));
+    }
 }
