@@ -128,4 +128,19 @@ public sealed class BeltLane
         if (_gaps.Count > 0) _gaps[0] += subtiles;
         _openIndex = 0;
     }
+
+    // 把相对 gap 列表转成"每个物品前沿距出口的绝对亚格距离"(前到后)。
+    // 冷路径(合并/拆分/存档),一次线性扫描,允许分配。
+    public IReadOnlyList<int> ToAbsolutePositions()
+    {
+        var result = new int[_gaps.Count];
+        int pos = 0;
+        for (int i = 0; i < _gaps.Count; i++)
+        {
+            pos += _gaps[i];
+            result[i] = pos;
+            pos += ItemWidthSubTiles;
+        }
+        return result;
+    }
 }

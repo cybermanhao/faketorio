@@ -287,4 +287,29 @@ public class BeltLaneTests
         var lane = new BeltLane(256);
         Assert.Throws<ArgumentOutOfRangeException>(() => lane.ExtendFront(-1));
     }
+
+    [Fact]
+    public void ToAbsolutePositions_EmptyLane_ReturnsEmpty()
+    {
+        var lane = new BeltLane(256);
+        Assert.Empty(lane.ToAbsolutePositions());
+    }
+
+    [Fact]
+    public void ToAbsolutePositions_ReturnsLeadingEdgeDistancesFromExit()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(); // gaps=[192]
+        lane.Advance(100);       // gaps=[92]
+        lane.TryInsertAtBack(); // gaps=[92,36]
+        Assert.Equal(new[] { 92, 192 }, lane.ToAbsolutePositions()); // 92, 92+64+36
+    }
+
+    [Fact]
+    public void ToAbsolutePositions_TouchingItems_AreOneWidthApart()
+    {
+        var lane = new BeltLane(256);
+        for (int i = 0; i < 2; i++) { lane.TryInsertAtBack(); lane.Advance(1000); }
+        Assert.Equal(new[] { 0, 64 }, lane.ToAbsolutePositions());
+    }
 }
