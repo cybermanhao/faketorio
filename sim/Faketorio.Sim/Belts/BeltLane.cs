@@ -7,9 +7,8 @@ namespace Faketorio.Sim.Belts;
 // 距离——整数亚格单位,1 tile = 256。这让正常流动只需增减最前面一个 gap
 // (O(1));堵塞时也只需增减"最后一个未压缩到 0 的 gap"。
 //
-// lineLengthSubTiles 是这条 lane 可用的总长度。M1 Plan 2 只在单个传送带
-// 格子(256)上使用这个类型;之后若要把相邻传送带合并成更长的 line,只
-// 需传入更大的长度——本类型的算法不需要改动。
+// lineLengthSubTiles 是这条 lane 可用的总长度。本类型现在支持在两端延长 line:
+// ExtendBack(入口侧) / ExtendFront(出口侧) 可原地增长长度,无需从头重建。
 public sealed class BeltLane
 {
     // spec: 物品间距 0.25 tile = 64 亚格单位(每个物品占用的"槽宽")。
@@ -21,9 +20,10 @@ public sealed class BeltLane
     private readonly List<int> _gaps = new();
     private int _lineLengthSubTiles;
 
-    // 第一个"可能仍未压缩到 0"的下标;之前的下标已确认为 0,Advance 不再
-    // 重新扫描它们——这就是摊还 O(1) 的关键。只有 RemoveFront(Task 3)
-    // 会把它重置回 0。
+    // 摊还 O(1) 的关键游标。不变式:_openIndex ≤ 第一个非零 gap 的下标
+    // (全零时取 Count-1)。任何会让更靠前的 gap 重新变非零的操作都必须把它
+    // 收回 —— RemoveFront / ExtendFront 归 0,FromAbsolutePositions 重建时取 0,
+    // TryRemoveItemInRange 收回到被摘除的下标。Advance 只会把它往后推。
     private int _openIndex;
 
     public BeltLane(int lineLengthSubTiles)
@@ -151,6 +151,7 @@ public sealed class BeltLane
     // 相邻前沿差 < ItemWidthSubTiles 视为物品重叠(上游 bug),fail-fast。
     public static BeltLane FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)
     {
+        ArgumentNullException.ThrowIfNull(positions);
         var lane = new BeltLane(lineLength); // 长度非法时构造函数抛 ArgumentOutOfRangeException
         int prevTrailingEdge = 0;
         for (int i = 0; i < positions.Count; i++)
@@ -159,7 +160,9 @@ public sealed class BeltLane
             int gap = leadingEdge - prevTrailingEdge;
             if (gap < 0)
                 throw new ArgumentException(
-                    $"position[{i}]={leadingEdge} overlaps previous item (gap {gap})",
+                    i == 0
+                        ? $"position[0]={leadingEdge} is past the exit (negative)"
+                        : $"position[{i}]={leadingEdge} overlaps previous item (gap {gap})",
                     nameof(positions));
             lane._gaps.Add(gap);
             prevTrailingEdge = leadingEdge + ItemWidthSubTiles;
@@ -172,6 +175,8 @@ public sealed class BeltLane
     }
 
     // 摘除"前沿绝对距离落在 [fromSubTile, toSubTile) 内"的最前一个物品。
+    // 注:范围测试仅限每个物品的前沿(不含体重叠),故若需捕获体跨越 [fromSubTile, toSubTile)
+    // 的物品,调用者需把 fromSubTile 扩大至多 ItemWidthSubTiles-1。用于 Plan 3c 的格子移除。
     // 命中:把它前方 gap、自身 ItemWidthSubTiles、后方 gap 缝合进后一个 gap
     // (是最后一个物品时直接丢弃,腾出的空间自动回到队尾),返回 true。
     // 无命中:返回 false,不改状态。

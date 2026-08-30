@@ -425,6 +425,16 @@ public class BeltLaneTests
     }
 
     [Fact]
+    public void TryRemoveItemInRange_TwoItemsInRange_RemovesFrontmost()
+    {
+        var lane = MakeThreeItemLane();                 // gaps=[20,20,24],前沿 20/104/192
+        Assert.True(lane.TryRemoveItemInRange(0, 150)); // 范围包含前沿 20 和 104 的两个物品
+        Assert.Equal(new[] { 104, 24 }, lane.Gaps);    // 20 + 20 + 64 = 104
+        Assert.Equal(2, lane.Count);
+        Assert.Equal(new[] { 104, 192 }, lane.ToAbsolutePositions()); // 幸存物品位置不变
+    }
+
+    [Fact]
     public void WriteState_SameGaps_SameHash_RegardlessOfInternalCursor()
     {
         var blocked = new BeltLane(256);
