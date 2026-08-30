@@ -21,11 +21,11 @@
 | 方法 | 用途 |
 |---|---|
 | `ExtendBack(int subtiles)` | 并入队尾方向的相邻线段:只增长 `_lineLengthSubTiles`,不碰任何 gap(`BackFreeSubTiles` 的公式自动反映新长度) |
-| `ExtendFront(int subtiles)` | 并入出口方向的相邻线段:增长 `_lineLengthSubTiles`,并给 `gaps[0]` 加上 `subtiles`(空线时无 gap 可加,跳过);出口整体往外挪了,最前物品到(新)出口的距离要相应变大 |
+| `ExtendFront(int subtiles)` | 并入出口方向的相邻线段:增长 `_lineLengthSubTiles`,给 `gaps[0]` 加上 `subtiles`(空线时无 gap 可加,跳过),**并把 `_openIndex` 重置为 0**——出口整体往外挪,原本被压缩到 0 的最前 gap 现在重新有了空间;游标若停在它后面(线曾处于堵塞态),最前物品会永远不向新出口前进 |
 | `ToAbsolutePositions()` | 把 gap 列表转成"每个物品前沿距出口的绝对亚格距离"列表(前到后),一次线性扫描 |
-| `static FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)` | 反向操作:从绝对位置列表和总长度重建一条新 `BeltLane`(其余状态如 `_openIndex` 按重建后的 gap 分布重新推导为安全初值,不假定沿用旧值) |
-| `TryRemoveItemInRange(int fromSubTile, int toSubTile)` | 摘除前沿落在 `[fromSubTile, toSubTile)` 内的物品(若有),摘除后把它前后两侧的 gap 缝合成一个(`RemoveFront` 是这个操作在"最前面、前面没有物品"这个特例下的简化版);无物品命中时返回 `false`,不改变状态 |
-| `WriteState(IStateWriter)` | 按既有模式(参照 `EntityPool<T>.WriteState`)写出 gap 列表与 `_openIndex`,供确定性哈希/未来存档使用;**不写** `TouchesInLastAdvance`(纯诊断字段,Plan 2 已注明) |
+| `static FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)` | 反向操作:从"前沿绝对距离"列表(前到后)和总长度重建一条新 `BeltLane`;`_openIndex` 直接取 0(唯一恒安全的初值)。相邻位置差 < `ItemWidthSubTiles` 说明物品重叠(上游 bug),fail-fast。**这同时是"把两条带物品的 `BeltLane` 拼接成一条"的构造块**,见第 5 节三路合并 |
+| `TryRemoveItemInRange(int fromSubTile, int toSubTile)` | 摘除前沿落在 `[fromSubTile, toSubTile)` 内的物品(若有),摘除后把它前后两侧的 gap 缝合成一个(`RemoveFront` 是这个操作在"最前面、前面没有物品"这个特例下的简化版);无物品命中时返回 `false`,不改变状态。若被摘物品的下标 ≤ `_openIndex`,把 `_openIndex` 收回到该下标(下游物品重新有空间,与 `RemoveFront` 重置游标同理) |
+| `WriteState(IStateWriter)` | 按既有模式(参照 `EntityPool<T>.WriteState`)写出 gap 数量 + gap 列表。**不写** `_openIndex`,也**不写** `TouchesInLastAdvance`:两者都是纯派生字段,加载后 `_openIndex` 置 0、下一次 `Advance` 多扫一趟即自愈,最终 gap 轨迹与状态哈希不受影响——状态哈希只认 gap 数值 |
 
 `ItemWidthSubTiles`(64)、`Advance` 的摊还 O(1) 核心逻辑、`RemoveFront` 的既有语义全部不变。
 
@@ -50,10 +50,17 @@ BeltLine {
 
 放置一格新传送带时,检查它的"背后邻格"和"前方邻格":
 
-- 邻格若是某条现有 `BeltLine` 的端点、且方向能对上(首尾能拼接,不是同向背对背或相对而立),则合并:
+- 邻格若是某条现有 `BeltLine` 的端点、且方向能对上(首尾能拼接,不是同向背对背或相对而立),则合并。**不要求两格是同一个 `TransportBeltPrototype`**(黄带红带同向相邻也会合并;混速线按出口格速度跑,见第 7 节):
   - 并到该线**入口端**:该线两条 lane 各调用一次 `ExtendBack(256)`,把新格追加进 `Tiles` 尾部。
   - 并到该线**出口端**:该线两条 lane 各调用一次 `ExtendFront(256)`,把新格插入 `Tiles` 头部。
-- **两边都能接**(新格恰好补在两段现有线中间的空隙,三路合并):先与一边合并一次,再把合并结果与另一边合并一次——复用同一个两段合并操作两次,不需要专门的三路算法。
+- **两边都能接**(新格 T 恰好补在两段现有线 L1〔上游 / 入口侧〕、L2〔下游 / 出口侧〕之间的一格空隙,三路合并):对 A/B 两条 lane 各做一次——
+  - `frontPos = L2.ToAbsolutePositions()`
+  - `backPos  = L1.ToAbsolutePositions()`,每项加上 `256 + L2.len`(越过新格 T 和整条 L2)
+  - `combined = frontPos ++ backPos`
+  - `newLane  = BeltLane.FromAbsolutePositions(L1.len + 256 + L2.len, combined)`
+  - `Tiles`:`L2.Tiles ++ [T] ++ L1.Tiles`;新 `BeltLine` 登记进池,L1/L2 旧槽位释放。
+
+  这一步需要"两条各自带物品的 lane 拼接"能力——`ExtendBack(256)` 做不到,它只处理"加一个空格子"。拼接直接用 `ToAbsolutePositions`/`FromAbsolutePositions`(第 3 节,均属 Plan 3a),不需要专门的三路算法,但**依赖这对原语**。边界物品不会重叠:新格 T 在 L1、L2 之间留了一整格空隙。
 - **两边都接不上**:新建一条只含这一格的 `BeltLine`(两条全新的、长度 256 的 `BeltLane`)。
 
 合并只发生在放置时,不在每 tick 触发。
@@ -73,19 +80,29 @@ BeltLine {
 
 ## 7. 每 tick 系统更新
 
-`Simulation.Step()` 新增一步:按 `BeltLine` 池的索引序(与 `WriteState` 遍历方式一致)遍历所有存活的线,对每条线的 `LaneA`/`LaneB` 各调用一次 `Advance(speed)`。线与线之间互不影响(本设计不含机械臂/箱子等下游消费者,物品到出口后停在 `gaps[0]==0`,`IsFrontReady` 就是这个信号),因此处理顺序不影响正确性,不需要拓扑排序。
+`Simulation.Step()` 在命令应用之后新增两步:
 
-`speed` 取自该线传送带的 `TransportBeltPrototype.SpeedSubTilesPerTick`(Plan 2 已定义;沿用 Plan 2 记录过的约束:该值应能整除 `ItemWidthSubTiles`=64,否则 `Advance` 丢弃当 tick 剩余推进量会造成微小吞吐损耗,见 Plan 2 的既有注释)。
+**1. 推进**:按 `BeltLine` 池的索引序(与 `WriteState` 遍历方式一致)遍历所有存活的线,对每条线的 `LaneA`/`LaneB` 各调用一次 `Advance(speed)`。
+
+`speed` 取自**该线出口格**(`Tiles[0]`)的传送带 `TransportBeltPrototype.SpeedSubTilesPerTick`(Plan 2 已定义;沿用 Plan 2 的约束:该值应整除 `ItemWidthSubTiles`=64,否则 `Advance` 丢弃当 tick 剩余推进量会造成微小吞吐损耗)。合并不要求同 prototype(第 5 节),一条线可能跨越不同速度的格子——本设计的既定行为是**整条线按出口格速度跑**,不模拟"物品进入慢段减速"。精确分段速度留给分离器 / 多带种计划;M1 的基准与测试场景用单一带种,不触发这个近似。
+
+**2. 线间交接(最简版)**:推进之后,再按池索引序遍历每条线,解析它出口格 `Tiles[0]` 的"前方邻格"——若该格属于另一条线 D 的入口端,则对 A/B 两条 lane 各做:
+`while (本线.LaneX.IsFrontReady && D.LaneX.TryInsertAtBack()) 本线.LaneX.RemoveFront();`
+前方邻格通过 `WorldGrid.GetEntityAt` + `EntityId → 线` 稀疏数组解析,不存下游引用(避免悬垂)。`TryInsertAtBack` 自带 64 亚格间距校验:下游空带时一次 tick 可搬多个物品(符合"空带自由铺入"),下游满带时自然停在 `IsFrontReady`。
+
+遍历序固定(池索引),所以完全确定。顺序确实影响"某物品这一 tick 还是下一 tick 过界"(链式 A→B→C 中,先处理 A 可能让一个物品一 tick 内连过两个边界,仅在带子近空时发生),但序固定 ⇒ 回放必然复现,不需要拓扑排序。真正的线尾(没有下游线,也还没有机械臂 / 箱子接入)物品停在 `gaps[0]==0`,`IsFrontReady` 就是等待信号。
 
 ## 8. `IStateWriter` 覆盖
 
-`Simulation.WriteState` 追加:按 `BeltLine` 池索引序,依次写每条线的 `Direction`、`Tiles`(数量+每格坐标,确定顺序)、`LaneA`/`LaneB` 的 `WriteState` 输出(第 3 节新增的方法)。
+`Simulation.WriteState` 追加:按 `BeltLine` 池索引序,依次写每条线的 `Direction`、`Tiles`(数量+每格坐标,确定顺序)、`LaneA`/`LaneB` 的 `WriteState` 输出(第 3 节;gap 数量 + gap 列表,不含 `_openIndex`)。
 
 ## 9. 明确不做(留给更后续的计划)
 
 - 机械臂的实际行为(够不够得着、抓取节奏、过滤器、增量追踪定位)——本设计只保证 `TryRemoveItemInRange` 这个原语存在,机械臂计划是纯粹的调用者。
 - 玩家手动从传送带取物品的输入/UI/背包联动——同样只依赖 `TryRemoveItemInRange`,交互层不在本设计范围。
 - 分离器(spec 5.2 提到的天然切分点)——分离器出现后,合并算法需要把"遇到分离器"也当作端点边界,这是后续计划的事,本设计的合并/拆分算法先只考虑"两个同向传送带直接相邻"这一种边界。
+- 侧向汇入(sideloading:一条带垂直怼到另一条线的侧面喂入单侧 lane)——本设计中"贴在一条线中间而非端点"的新格一律落到"两边都接不上 → 新建单格线"。侧向汇入是后续计划。
+- 混速合并线的精确减速——见第 7 节,本设计整条线按出口格速度跑,不模拟物品进入慢段减速。
 - 传送带旋转导致的 footprint 宽高互换——Plan 2 已指出 `EntityData.Rotation` 存了但未使用,本设计的传送带固定 1×1,不涉及这个问题。
 
 ## 10. 风险与待确认点
@@ -98,8 +115,8 @@ BeltLine {
 延续 M1 Plan 1→Plan 2 的节奏,拆成几个顺序执行、各自独立可测的小计划:
 
 - **Plan 3a**:`BeltLane` 新增能力(`ExtendBack`/`ExtendFront`/`ToAbsolutePositions`/`FromAbsolutePositions`/`TryRemoveItemInRange`/`WriteState`)+ 独立单测,不碰 `BeltLine`/`Simulation`
-- **Plan 3b**:`BeltLine` 数据结构 + 合并算法(含三路)+ 独立单测,不碰 `Simulation`
+- **Plan 3b**:`BeltLine` 数据结构 + 合并算法(含三路,拼接复用 3a 的 `ToAbsolutePositions`/`FromAbsolutePositions`)+ 独立单测,不碰 `Simulation`
 - **Plan 3c**:拆分算法 + 独立单测,不碰 `Simulation`
-- **Plan 3d**:接入 `Simulation`(放置/拆除触发合并拆分、每 tick 更新、`IStateWriter`)+ 贯通集成测试 + 确定性测试
+- **Plan 3d**:接入 `Simulation`(放置/拆除触发合并拆分、每 tick 推进 + 线间交接最简版、`IStateWriter`)+ 贯通集成测试(含 L 形拐弯两条线的物品交接)+ 确定性测试(含存档/读档后 `_openIndex` 归零仍哈希一致)
 
 每个计划都走完整的"实现→审查→(修复→复审)"闭环,前一个合并进 `main` 后再规划下一个的具体任务清单(避免过早锁定后面计划的细节,给中途发现的问题留调整空间)。
