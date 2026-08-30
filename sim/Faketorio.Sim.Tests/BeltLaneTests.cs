@@ -312,4 +312,54 @@ public class BeltLaneTests
         for (int i = 0; i < 2; i++) { lane.TryInsertAtBack(); lane.Advance(1000); }
         Assert.Equal(new[] { 0, 64 }, lane.ToAbsolutePositions());
     }
+
+    [Fact]
+    public void FromAbsolutePositions_RoundTripsWithToAbsolutePositions()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(); lane.Advance(100);
+        lane.TryInsertAtBack();                 // gaps=[92,36]
+        var rebuilt = BeltLane.FromAbsolutePositions(256, lane.ToAbsolutePositions());
+        Assert.Equal(new[] { 92, 36 }, rebuilt.Gaps);
+        Assert.Equal(2, rebuilt.Count);
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_EmptyList_GivesEmptyLaneOfGivenLength()
+    {
+        var lane = BeltLane.FromAbsolutePositions(512, Array.Empty<int>());
+        Assert.Equal(0, lane.Count);
+        Assert.True(lane.TryInsertAtBack());
+        Assert.Equal(new[] { 448 }, lane.Gaps); // 512 - 64
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_OverlappingItems_Throws()
+    {
+        Assert.Throws<ArgumentException>(
+            () => BeltLane.FromAbsolutePositions(256, new[] { 10, 50 })); // 50-10 < 64
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_ItemPastExit_Throws()
+    {
+        Assert.Throws<ArgumentException>(
+            () => BeltLane.FromAbsolutePositions(256, new[] { -1 }));
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_ItemOverrunsLineEnd_Throws()
+    {
+        Assert.Throws<ArgumentException>(
+            () => BeltLane.FromAbsolutePositions(256, new[] { 200 })); // 200+64 > 256
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_CursorStartsAtZero_BlockedLaneStillConverges()
+    {
+        var lane = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 });
+        Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
+        lane.Advance(7); // 不抛、不产生负值
+        Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
+    }
 }

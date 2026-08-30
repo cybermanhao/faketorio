@@ -143,4 +143,29 @@ public sealed class BeltLane
         }
         return result;
     }
+
+    // 从"前沿绝对距离"列表(前到后、升序)和总长度重建一条新 lane。
+    // _openIndex 取默认 0(唯一恒安全的初值,不沿用来源 lane 的游标)。
+    // 相邻前沿差 < ItemWidthSubTiles 视为物品重叠(上游 bug),fail-fast。
+    public static BeltLane FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)
+    {
+        var lane = new BeltLane(lineLength); // 长度非法时构造函数抛 ArgumentOutOfRangeException
+        int prevTrailingEdge = 0;
+        for (int i = 0; i < positions.Count; i++)
+        {
+            int leadingEdge = positions[i];
+            int gap = leadingEdge - prevTrailingEdge;
+            if (gap < 0)
+                throw new ArgumentException(
+                    $"position[{i}]={leadingEdge} overlaps previous item (gap {gap})",
+                    nameof(positions));
+            lane._gaps.Add(gap);
+            prevTrailingEdge = leadingEdge + ItemWidthSubTiles;
+        }
+        if (prevTrailingEdge > lineLength)
+            throw new ArgumentException(
+                $"last item trailing edge {prevTrailingEdge} exceeds line length {lineLength}",
+                nameof(positions));
+        return lane;
+    }
 }
