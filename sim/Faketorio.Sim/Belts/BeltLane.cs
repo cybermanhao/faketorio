@@ -168,4 +168,36 @@ public sealed class BeltLane
                 nameof(positions));
         return lane;
     }
+
+    // 摘除"前沿绝对距离落在 [fromSubTile, toSubTile) 内"的最前一个物品。
+    // 命中:把它前方 gap、自身 ItemWidthSubTiles、后方 gap 缝合进后一个 gap
+    // (是最后一个物品时直接丢弃,腾出的空间自动回到队尾),返回 true。
+    // 无命中:返回 false,不改状态。
+    // RemoveFront 是本操作在"下标 0、前方 gap 为 0"特例下的简化版。
+    public bool TryRemoveItemInRange(int fromSubTile, int toSubTile)
+    {
+        int pos = 0;
+        int removeAt = -1;
+        for (int k = 0; k < _gaps.Count; k++)
+        {
+            pos += _gaps[k];                    // 物品 k 的前沿
+            if (pos >= toSubTile) return false; // 前沿只增不减,后面不可能再命中
+            if (pos >= fromSubTile) { removeAt = k; break; }
+            pos += ItemWidthSubTiles;
+        }
+        if (removeAt < 0) return false;
+
+        if (removeAt + 1 < _gaps.Count)
+            _gaps[removeAt + 1] += _gaps[removeAt] + ItemWidthSubTiles;
+        _gaps.RemoveAt(removeAt);
+
+        if (removeAt <= _openIndex)
+            _openIndex = removeAt;
+        if (_gaps.Count == 0)
+            _openIndex = 0;
+        else if (_openIndex > _gaps.Count - 1)
+            _openIndex = _gaps.Count - 1;
+
+        return true;
+    }
 }

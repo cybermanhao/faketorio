@@ -362,4 +362,70 @@ public class BeltLaneTests
         lane.Advance(7); // 不抛、不产生负值
         Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
     }
+
+    [Fact]
+    public void TryRemoveItemInRange_NoItemInRange_ReturnsFalseAndKeepsState()
+    {
+        var lane = MakeThreeItemLane();                 // gaps=[20,20,24],前沿 20/104/192
+        Assert.False(lane.TryRemoveItemInRange(200, 220));
+        Assert.Equal(new[] { 20, 20, 24 }, lane.Gaps);
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_MiddleItem_StitchesGapsKeepingSurvivorsInPlace()
+    {
+        var lane = MakeThreeItemLane();
+        Assert.True(lane.TryRemoveItemInRange(100, 110)); // 命中中间物品(前沿 104)
+        Assert.Equal(new[] { 20, 108 }, lane.Gaps);        // 24 + 20 + 64
+        Assert.Equal(new[] { 20, 192 }, lane.ToAbsolutePositions()); // 幸存物品没有移动
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_LastItem_JustDropsIt()
+    {
+        var lane = MakeThreeItemLane();
+        Assert.True(lane.TryRemoveItemInRange(190, 260));
+        Assert.Equal(new[] { 20, 20 }, lane.Gaps);
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_FrontItemWithNonZeroFrontGap_FoldsIntoNextGap()
+    {
+        var lane = MakeThreeItemLane();
+        Assert.True(lane.TryRemoveItemInRange(0, 50));   // 命中最前物品(前沿 20)
+        Assert.Equal(new[] { 104, 24 }, lane.Gaps);       // 20 + 20 + 64
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_MatchesRemoveFront_InTheFrontZeroGapCase()
+    {
+        var a = new BeltLane(256);
+        a.TryInsertAtBack(); a.Advance(100); a.TryInsertAtBack(); a.Advance(110); // gaps=[0,18]
+        var b = new BeltLane(256);
+        b.TryInsertAtBack(); b.Advance(100); b.TryInsertAtBack(); b.Advance(110); // gaps=[0,18]
+
+        a.RemoveFront();
+        Assert.True(b.TryRemoveItemInRange(0, 1));
+
+        Assert.Equal(a.Gaps, b.Gaps); // 两者都是 [82]
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_PullsCursorBackSoTrailingItemsAdvance()
+    {
+        var lane = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 }); // gaps=[0,0,0,0]
+        lane.Advance(1000); // 游标推到末尾,gaps 仍是 [0,0,0,0]
+
+        Assert.True(lane.TryRemoveItemInRange(64, 65)); // 摘掉下标 1(前沿 64)
+        // 缝合:_gaps[2] += _gaps[1] + 64 => [0,0,64,0],RemoveAt(1) => [0,64,0]
+
+        lane.Advance(64); // 若游标没被收回,这个 64 gap 不会被消耗
+        Assert.Equal(new[] { 0, 0, 0 }, lane.Gaps);
+    }
+
+    private static BeltLane MakeThreeItemLane()
+    {
+        // len 256,三个 64 宽物品,gap 20/20/24(和 64 + 物品体 192 = 256)
+        return BeltLane.FromAbsolutePositions(256, new[] { 20, 104, 192 });
+    }
 }
