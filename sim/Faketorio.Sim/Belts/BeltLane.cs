@@ -1,3 +1,5 @@
+using Faketorio.Sim.State;
+
 namespace Faketorio.Sim.Belts;
 
 // 一条传送带 lane 上的物品流,采用 FFF-176 的 gap 表示法(spec 5.2/5.6):
@@ -199,5 +201,16 @@ public sealed class BeltLane
             _openIndex = _gaps.Count - 1;
 
         return true;
+    }
+
+    // 规范序列化(spec 铁律 4):只写 gap 数量与 gap 列表。
+    // 不写 _openIndex / TouchesInLastAdvance——两者纯派生:加载后 _openIndex
+    // 归 0,下一次 Advance 多扫一趟即自愈,最终 gap 轨迹与状态哈希不受影响。
+    // 线长不在这里写:BeltLine.WriteState 会写 Tiles 数量(线长 = 256 × 格数)。
+    public void WriteState(IStateWriter writer)
+    {
+        writer.Write(_gaps.Count);
+        for (int i = 0; i < _gaps.Count; i++)
+            writer.Write(_gaps[i]);
     }
 }

@@ -1,4 +1,5 @@
 using Faketorio.Sim.Belts;
+using Faketorio.Sim.State;
 
 namespace Faketorio.Sim.Tests;
 
@@ -423,9 +424,46 @@ public class BeltLaneTests
         Assert.Equal(new[] { 0, 0, 0 }, lane.Gaps);
     }
 
+    [Fact]
+    public void WriteState_SameGaps_SameHash_RegardlessOfInternalCursor()
+    {
+        var blocked = new BeltLane(256);
+        for (int i = 0; i < 4; i++) { blocked.TryInsertAtBack(); blocked.Advance(1000); }
+        // blocked.Gaps == [0,0,0,0],内部游标停在末尾
+
+        var rebuilt = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 });
+        // rebuilt.Gaps == [0,0,0,0],游标在 0
+
+        Assert.Equal(Hash(blocked), Hash(rebuilt));
+    }
+
+    [Fact]
+    public void WriteState_DifferentGaps_DifferentHash()
+    {
+        var a = new BeltLane(256);
+        a.TryInsertAtBack();                 // gaps=[192]
+        var b = new BeltLane(256);
+        b.TryInsertAtBack(); b.Advance(50);  // gaps=[142]
+        Assert.NotEqual(Hash(a), Hash(b));
+    }
+
+    [Fact]
+    public void WriteState_EmptyLane_IsStable()
+    {
+        var lane = new BeltLane(256);
+        Assert.Equal(Hash(lane), Hash(lane));
+    }
+
     private static BeltLane MakeThreeItemLane()
     {
         // len 256,三个 64 宽物品,gap 20/20/24(和 64 + 物品体 192 = 256)
         return BeltLane.FromAbsolutePositions(256, new[] { 20, 104, 192 });
+    }
+
+    private static ulong Hash(BeltLane lane)
+    {
+        var w = new Fnv1aHashWriter();
+        lane.WriteState(w);
+        return w.Hash;
     }
 }
