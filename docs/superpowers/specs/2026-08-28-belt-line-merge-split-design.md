@@ -26,8 +26,10 @@
 | `static FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)` | 反向操作:从"前沿绝对距离"列表(前到后)和总长度重建一条新 `BeltLane`;`_openIndex` 直接取 0(唯一恒安全的初值)。相邻位置差 < `ItemWidthSubTiles` 说明物品重叠(上游 bug),fail-fast。**这同时是"把两条带物品的 `BeltLane` 拼接成一条"的构造块**,见第 5 节三路合并 |
 | `TryRemoveItemInRange(int fromSubTile, int toSubTile)` | 摘除前沿落在 `[fromSubTile, toSubTile)` 内的物品(若有),摘除后把它前后两侧的 gap 缝合成一个(`RemoveFront` 是这个操作在"最前面、前面没有物品"这个特例下的简化版);无物品命中时返回 `false`,不改变状态。若被摘物品的下标 ≤ `_openIndex`,把 `_openIndex` 收回到该下标(下游物品重新有空间,与 `RemoveFront` 重置游标同理) |
 | `WriteState(IStateWriter)` | 按既有模式(参照 `EntityPool<T>.WriteState`)写出 gap 数量 + gap 列表。**不写** `_openIndex`,也**不写** `TouchesInLastAdvance`:两者都是纯派生字段,加载后 `_openIndex` 置 0、下一次 `Advance` 多扫一趟即自愈,最终 gap 轨迹与状态哈希不受影响——状态哈希只认 gap 数值 |
+| `ShrinkBack(int subtiles)`(Plan 3c) | `ExtendBack` 的逆:入口端截短,`_lineLengthSubTiles -= subtiles`,不碰任何 gap。前置条件:被截区间 `[新长, 旧长)` 内没有物品——`BackFreeSubTiles() < subtiles` 时说明还有物品会被截飞,抛 `InvalidOperationException`(fail-fast,调用者须先清)。`_openIndex` 不变(截短只让 gap 更压缩,不违反"游标 ≤ 首个非零 gap 下标") |
+| `ShrinkFront(int subtiles)`(Plan 3c) | `ExtendFront` 的逆:出口端截短,`_lineLengthSubTiles -= subtiles`,`gaps[0] -= subtiles`(空线跳过)。前置条件:`gaps[0] >= subtiles`(出口 `subtiles` 内无物品),否则抛 `InvalidOperationException`。`_openIndex` 不变(同上;`gaps[0]` 只会更小/归 0,不会重新非零) |
 
-`ItemWidthSubTiles`(64)、`Advance` 的摊还 O(1) 核心逻辑、`RemoveFront` 的既有语义全部不变。
+上表前六行属 Plan 3a(已合并);`ShrinkBack`/`ShrinkFront` 属 Plan 3c。`ItemWidthSubTiles`(64)、`Advance` 的摊还 O(1) 核心逻辑、`RemoveFront` 的既有语义全部不变。
 
 ## 4. `BeltLine`(新类型)
 
@@ -80,16 +82,24 @@ BeltLine {
 
 ## 6. 拆分算法(移除传送带)
 
-移除一格属于某条线的传送带:
+`BeltNetwork.RemoveBelt(int x, int y)`:`_tiles.Get(x,y)` 找到线,线性扫 `line.Tiles` 拿到该格下标 `k` 与 `n = Tiles.Count`。被清下来的物品先摘下并**计数**——去向(丢弃 / 掉地上 / 进玩家背包)不是本设计决定的,见第 10 节。设 `L = BeltLine.TileSubTiles`(256)、`W = ItemWidthSubTiles`(64)。
 
-- 若它是线的**端点**:直接从 `Tiles` 摘掉,两条 lane 缩短(出口端摘除时,先用 `TryRemoveItemInRange` 摘掉可能卡在该格范围内的物品,命中即丢弃,见第 10 节风险;入口端摘除只需缩短长度)。
-- 若它在线的**中间**:整条线拆成两条独立的线。两条 lane 各自:
-  1. `ToAbsolutePositions()` 转成绝对位置列表
-  2. 按被移除格子的亚格边界,把物品分成前后两组
-  3. 各自用 `FromAbsolutePositions` 重建一条新 `BeltLane`(前半段沿用原有出口,长度=移除点之前的长度;后半段的出口是移除点后面那格的入口边界,长度=剩余长度)
-  4. `Tiles` 列表相应一分为二,两条独立 `BeltLine` 各自登记进池
+- **`n == 1`**:`_pool.Destroy` 整条线,`_tiles.Clear(x,y)`。
+- **`k == 0`(出口端)**:两条 lane 各 `while (lane.TryRemoveItemInRange(0, L)) count++;` 清掉该格上的物品,再各 `ShrinkFront(L)`,`Tiles.RemoveAt(0)`。**线 id 不变**,`_tiles.Clear(x,y)`。
+- **`k == n-1`(入口端)**:两条 lane 各 `while (lane.TryRemoveItemInRange((n-1)*L - (W-1), n*L)) count++;` ——低端向前拓宽 `W-1`,把"前沿在上一格、身体跨进被移格"的物品也清掉(否则 `ShrinkBack` 会把它截飞)。再各 `ShrinkBack(L)`,`Tiles.RemoveAt(n-1)`。id 不变,`_tiles.Clear(x,y)`。
+  ——这修正了本节旧文"入口端摘除只需缩短长度":不先清物品会把它们截飞。
+- **中间(`0 < k < n-1`)**:
+  1. 两条 lane 各 `abs = ToAbsolutePositions()` 快照(在任何 mutation 之前)。
+  2. **后半段**(全新 `BeltLine`,新 id):对每条 lane,`backPos = [p - (k+1)*L for p in abs if p >= (k+1)*L]`,`FromAbsolutePositions((n-1-k)*L, backPos)`。`Tiles = 原 Tiles[k+1 ..]`;登记进池得 `backId`;这些格子的 `_tiles` 全部重指向 `backId`。
+  3. **前半段**(原线,id 不变):对每条 lane,分两轮从原线摘除物品——
+     - 先 `while (lane.TryRemoveItemInRange((k+1)*L, 当前长度)) {}`:把已在第 2 步复制进后半段的物品从原线移走,**不计数**(它们是搬走,不是丢失)。
+     - 再 `while (lane.TryRemoveItemInRange(k*L - (W-1), 当前长度)) count++;`:剩下前沿 `≥ k*L - (W-1)` 的都是被移格上的、或身体跨进被移格的物品,**丢弃并计数**。
+     然后各 `ShrinkBack((n-k)*L)`,`Tiles.RemoveRange(k, n-k)`。
+  4. `_tiles.Clear(x,y)`。
 
-拆分不在每 tick 热路径上,只在玩家拆除时触发一次,不要求 O(1),只要求正确、可测。
+  端点分支同理只需一轮清除:`k==0` 清 `[0, L)`(出口前无更前的格子、后方物品身体够不到出口格,不必拓宽);`k==n-1` 清 `[(n-1)*L - (W-1), n*L)`(拓宽 `W-1` 收跨界物品)。这些都计数(全是丢弃)。
+
+前半段 / 端点截短复用 `ShrinkBack`/`ShrinkFront`(id 稳定、tile 索引 churn 最小);只有中间拆分的后半段是全新线。拆分不在每 tick 热路径上,只在拆除时触发一次,不要求 O(1),只要求正确、可测。
 
 ## 7. 每 tick 系统更新
 
@@ -123,7 +133,7 @@ BeltLine {
 
 ## 10. 风险与待确认点
 
-- **移除的格子范围内恰好卡着一个物品该怎么办**:代码库目前完全没有"地面掉落物"这个概念(没有对应实体、没有对应 prototype),现在也不在这批计划的范围内引入它。因此拍板:`RemoveEntity` 处理传送带时,先对该格的亚格区间调用 `TryRemoveItemInRange`,命中就直接丢弃该物品(不生成任何替代实体),再执行端点摘除或中间拆分。这是本设计的既定行为,不是留给后续计划的开放项;若以后加入地面掉落物系统,再回来改这一步的处理方式。
+- **移除的格子上卡着的物品去哪**:分两层。**结构层(Plan 3c,`BeltNetwork.RemoveBelt`)**:被移格及其两侧亚格边界内的物品,用 `TryRemoveItemInRange` 循环摘下并**计数**,`RemoveBelt` 把计数返回给调用者。3c 不决定去向,也不引入任何替代实体。**策略层(Plan 3d 及以后)**:`Simulation` 接入后才有"谁在拆"的上下文,那时再定去向——玩家手拆进背包、机器人拆进物流网、脚本清除直接丢弃等。当前代码库既没有玩家背包、`BeltLane` 上的物品也还没有类型(`TryInsertAtBack` 无参、`_gaps` 只是整数),所以在 3d/背包系统落地前,实际效果 = 丢弃。这个分层让 3d 改去向时不必碰 3c。
 - **合并/拆分与 `WorldGrid` 的 footprint 占位如何配合**:传送带都是 1×1,`Simulation.Apply` 现有的 `PlaceEntity`/`RemoveEntity` 逻辑(占位检查、拒绝计数)不用改,合并/拆分是在这套既有逻辑成功执行**之后**追加的一步后处理。
 
 ## 11. 实施拆分成多个计划
@@ -131,8 +141,8 @@ BeltLine {
 延续 M1 Plan 1→Plan 2 的节奏,拆成几个顺序执行、各自独立可测的小计划:
 
 - **Plan 3a**(已合并):`BeltLane` 新增能力(`ExtendBack`/`ExtendFront`/`ToAbsolutePositions`/`FromAbsolutePositions`/`TryRemoveItemInRange`/`WriteState`)+ 独立单测。
-- **Plan 3b**:`BeltLineId` + `BeltLinePool`(引用类型池,分配器同 `EntityPool<T>` 思路,不改既有 struct 池)+ `BeltLine` 数据结构 + `BeltNetwork`(持有池 + `tile → BeltLineId` 分块索引)+ `AddBelt` 合并算法(单侧 / 三路 / 都不接;三路拼接复用 3a 的 `ToAbsolutePositions`/`FromAbsolutePositions`)+ 独立单测。任务清单里"合并后 **tile 索引重指向所有并入格子 + 释放旧线槽位**"要作为显式条目(尤其三路那条新线的整段重写),并有覆盖它的测试。不碰 `Simulation`、不碰 `Entities` 池、不做 `EntityId → 线` 反查、不做拆分。
-- **Plan 3c**:拆分算法(`BeltNetwork.RemoveBelt`,端点摘除 / 中间拆分)+ 独立单测,不碰 `Simulation`
+- **Plan 3b**(已合并):`BeltLineId` + `BeltLinePool`(引用类型池,分配器同 `EntityPool<T>` 思路,不改既有 struct 池)+ `BeltLine` 数据结构 + `BeltNetwork`(持有池 + `tile → BeltLineId` 分块索引)+ `AddBelt` 合并算法(单侧 / 三路 / 都不接)+ 独立单测。
+- **Plan 3c**:`BeltLane.ShrinkBack`/`ShrinkFront`(第 3 节,含 fail-fast 守卫)+ `TileToLineIndex.Clear` + `BeltNetwork.RemoveBelt`(第 6 节:`n==1` / 出口端 / 入口端 / 中间拆分四种;端点与前半段就地 `Shrink`,后半段全新线;断口跨界物品清除范围向前拓宽 `W-1`;返回被清物品计数)+ 独立单测(含"跨界物品被清"、"后半段物品绝对位置正确"、"前半段 id 不变 / 后半段新 id / tile 索引一致"、拆分确定性)。不碰 `Simulation`。
 - **Plan 3d**:接入 `Simulation`(放置/拆除触发合并拆分、`EntityId → 线` 反查数组、每 tick 推进 + 线间交接最简版、`IStateWriter`)+ 贯通集成测试(L 形拐弯两条线的物品交接;矩形环的循环与塞满冻结)+ 确定性测试(含存档/读档后 `_openIndex` 归零仍哈希一致)
 
 每个计划都走完整的"实现→审查→(修复→复审)"闭环,前一个合并进 `main` 后再规划下一个的具体任务清单(避免过早锁定后面计划的细节,给中途发现的问题留调整空间)。
