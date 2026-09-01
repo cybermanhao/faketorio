@@ -1,0 +1,68 @@
+using Faketorio.Sim.State;
+
+namespace Faketorio.Sim.Belts;
+
+// 传送带线的容器:持有 BeltLine 池 + tile→线 索引。放置传送带时 AddBelt
+// 触发合并(设计文档第 5 节);每 tick 推进与状态哈希按池索引序遍历。
+// 本类不知道 Simulation / Entities 的存在(Plan 3b 边界)。
+public sealed class BeltNetwork
+{
+    private readonly BeltLinePool _pool = new();
+    private readonly TileToLineIndex _tiles = new();
+
+    public int Capacity => _pool.Capacity;
+    public bool IsAliveAtIndex(int index) => _pool.IsAliveAtIndex(index);
+    public BeltLine GetAtIndex(int index) => _pool.GetAtIndex(index);
+
+    public BeltLineId GetLineAt(int x, int y) => _tiles.Get(x, y);
+    public BeltLine GetLine(BeltLineId id) => _pool.Get(id);
+
+    // 放置一格朝 direction 的传送带,返回它最终所属的线。
+    // 前置条件:(x, y) 未被任何传送带线占用(见 Global Constraints)。
+    public BeltLineId AddBelt(int x, int y, byte direction)
+    {
+        var t = new BeltLine(direction,
+            new List<(int X, int Y)> { (x, y) },
+            new BeltLane(BeltLine.TileSubTiles),
+            new BeltLane(BeltLine.TileSubTiles));
+        var tid = _pool.Create(t);
+        _tiles.Set(x, y, tid);
+
+        // Task 4/5 在此接合并分支。当前:无合并,单格线即结果。
+        return tid;
+    }
+
+    // 规范序列化(spec 铁律 4)。先写分配器簿记,再按池索引序写每条存活线的
+    // 内容:Direction、Tiles(数量 + 每格坐标)、两条 lane 的 WriteState。
+    // 与 Simulation.WriteState 写 Entities 的模式一致。
+    public void WriteState(IStateWriter writer)
+    {
+        _pool.WriteState(writer);
+        for (int i = 0; i < _pool.Capacity; i++)
+        {
+            if (!_pool.IsAliveAtIndex(i)) continue;
+            var line = _pool.GetAtIndex(i);
+            writer.Write(i);
+            writer.Write(_pool.GenerationAtIndex(i));
+            writer.Write(line.Direction);
+            writer.Write(line.Tiles.Count);
+            foreach (var (tx, ty) in line.Tiles)
+            {
+                writer.Write(tx);
+                writer.Write(ty);
+            }
+            line.LaneA.WriteState(writer);
+            line.LaneB.WriteState(writer);
+        }
+    }
+
+    // 方向 -> 单位位移。屏幕坐标(y 向下):北 = -y,南 = +y。
+    private static (int dx, int dy) Delta(byte d) => d switch
+    {
+        0 => (0, -1),
+        1 => (1, 0),
+        2 => (0, 1),
+        3 => (-1, 0),
+        _ => throw new ArgumentOutOfRangeException(nameof(d)),
+    };
+}
