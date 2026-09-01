@@ -80,4 +80,97 @@ public class BeltNetworkTests
         var b = new BeltNetwork(); b.AddBelt(0, 0, E); b.AddBelt(1, 9, E);
         Assert.NotEqual(Hash(a), Hash(b));
     }
+
+    // 顺着 E 方向从出口往入口一格格建:每次新格的下游邻格正好是已建线的入口端。
+    private static (BeltNetwork net, BeltLineId id) BuildEastLine(params (int x, int y)[] tilesFrontToBack)
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(tilesFrontToBack[0].x, tilesFrontToBack[0].y, E);
+        for (int i = 1; i < tilesFrontToBack.Length; i++)
+            id = net.AddBelt(tilesFrontToBack[i].x, tilesFrontToBack[i].y, E);
+        return (net, id);
+    }
+
+    [Fact]
+    public void AddBelt_BehindEntry_MergesOntoEntryEnd()
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(5, 3, E);      // 线 = [(5,3)]
+        var id2 = net.AddBelt(4, 3, E);     // (4,3) 的下游邻格 (5,3) 是线的入口端
+
+        Assert.Equal(id, id2);
+        Assert.Single(LiveLines(net));
+        var line = net.GetLine(id);
+        Assert.Equal(new[] { (5, 3), (4, 3) }, line.Tiles);
+        Assert.Equal(512, line.LengthSubTiles);
+        Assert.Equal(id, net.GetLineAt(4, 3));
+        Assert.Equal(id, net.GetLineAt(5, 3));
+    }
+
+    [Fact]
+    public void AddBelt_AheadOfExit_MergesOntoExitEnd()
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(5, 3, E);      // 线 = [(5,3)]
+        var id2 = net.AddBelt(6, 3, E);     // (6,3) 的上游邻格 (5,3) 是线的出口端
+
+        Assert.Equal(id, id2);
+        Assert.Single(LiveLines(net));
+        var line = net.GetLine(id);
+        Assert.Equal(new[] { (6, 3), (5, 3) }, line.Tiles); // 新格成为新的出口
+        Assert.Equal(512, line.LengthSubTiles);
+        Assert.Equal(id, net.GetLineAt(6, 3));
+    }
+
+    [Fact]
+    public void Build3TileLine_ByRepeatedEntryEndMerge()
+    {
+        var (net, id) = BuildEastLine((5, 3), (4, 3), (3, 3));
+        Assert.Single(LiveLines(net));
+        var line = net.GetLine(id);
+        Assert.Equal(new[] { (5, 3), (4, 3), (3, 3) }, line.Tiles);
+        Assert.Equal(768, line.LengthSubTiles);
+        foreach (var (tx, ty) in line.Tiles)
+            Assert.Equal(id, net.GetLineAt(tx, ty));
+    }
+
+    [Fact]
+    public void MergeOntoEntryEnd_PreservesItemPositions()
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(5, 3, E);
+        net.GetLine(id).LaneA.TryInsertAtBack();          // LaneA gaps = [192]
+        net.AddBelt(4, 3, E);                              // ExtendBack:不动物品
+        Assert.Equal(new[] { 192 }, net.GetLine(id).LaneA.Gaps);
+        Assert.Equal(new[] { 192 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void MergeOntoExitEnd_ShiftsItemAwayFromNewExit()
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(5, 3, E);
+        net.GetLine(id).LaneA.TryInsertAtBack();          // gaps = [192]
+        net.AddBelt(6, 3, E);                              // ExtendFront:gaps[0] += 256
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.Gaps);
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+    }
+
+    [Fact]
+    public void WrongDirectionNeighbour_DoesNotMerge()
+    {
+        var net = new BeltNetwork();
+        net.AddBelt(5, 3, E);
+        net.AddBelt(6, 3, S);   // 上游邻格是 (5,3),但方向不同
+        Assert.Equal(2, LiveLines(net).Count);
+    }
+
+    [Fact]
+    public void PerpendicularNeighbour_DoesNotMerge()
+    {
+        var (net, _) = BuildEastLine((5, 3), (4, 3), (3, 3));
+        net.AddBelt(4, 2, E);   // 上/下游邻格 (5,2)/(3,2) 都不是那条线的端点
+        Assert.Equal(2, LiveLines(net).Count);
+    }
 }

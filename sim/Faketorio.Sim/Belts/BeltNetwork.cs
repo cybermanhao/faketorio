@@ -28,7 +28,44 @@ public sealed class BeltNetwork
         var tid = _pool.Create(t);
         _tiles.Set(x, y, tid);
 
-        // Task 4/5 在此接合并分支。当前:无合并,单格线即结果。
+        var (dx, dy) = Delta(direction);
+        var back = (x - dx, y - dy);    // B:T 的上游邻格
+        var front = (x + dx, y + dy);   // F:T 的下游邻格
+
+        var bId = _tiles.Get(back.Item1, back.Item2);
+        var fId = _tiles.Get(front.Item1, front.Item2);
+
+        bool bHit = bId.IsValid && _pool.IsAlive(bId)
+            && _pool.Get(bId).Direction == direction
+            && _pool.Get(bId).Tiles[0] == back;
+        bool fHit = fId.IsValid && _pool.IsAlive(fId)
+            && _pool.Get(fId).Direction == direction
+            && _pool.Get(fId).Tiles[^1] == front;
+
+        if (bHit && fHit)
+            return tid; // Task 5:三路合并
+
+        if (bHit)
+        {
+            var l = _pool.Get(bId);
+            l.LaneA.ExtendFront(BeltLine.TileSubTiles);
+            l.LaneB.ExtendFront(BeltLine.TileSubTiles);
+            l.Tiles.Insert(0, (x, y));
+            _tiles.Set(x, y, bId);
+            _pool.Destroy(tid);
+            return bId;
+        }
+        if (fHit)
+        {
+            var l = _pool.Get(fId);
+            l.LaneA.ExtendBack(BeltLine.TileSubTiles);
+            l.LaneB.ExtendBack(BeltLine.TileSubTiles);
+            l.Tiles.Add((x, y));
+            _tiles.Set(x, y, fId);
+            _pool.Destroy(tid);
+            return fId;
+        }
+
         return tid;
     }
 
