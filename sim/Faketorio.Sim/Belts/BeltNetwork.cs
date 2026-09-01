@@ -21,6 +21,10 @@ public sealed class BeltNetwork
     // 前置条件:(x, y) 未被任何传送带线占用(见 Global Constraints)。
     public BeltLineId AddBelt(int x, int y, byte direction)
     {
+        // 先校验方向:非法 direction 在任何分配/索引写入之前抛出,
+        // 不会留下方向非法的孤儿线污染池与 tile 索引 / WriteState。
+        var (dx, dy) = Delta(direction);
+
         var t = new BeltLine(direction,
             new List<(int X, int Y)> { (x, y) },
             new BeltLane(BeltLine.TileSubTiles),
@@ -28,7 +32,6 @@ public sealed class BeltNetwork
         var tid = _pool.Create(t);
         _tiles.Set(x, y, tid);
 
-        var (dx, dy) = Delta(direction);
         var back = (x - dx, y - dy);    // B:T 的上游邻格
         var front = (x + dx, y + dy);   // F:T 的下游邻格
 

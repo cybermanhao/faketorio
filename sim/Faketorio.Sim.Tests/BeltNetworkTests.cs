@@ -52,6 +52,15 @@ public class BeltNetworkTests
         => Assert.False(new BeltNetwork().GetLineAt(9, 9).IsValid);
 
     [Fact]
+    public void AddBelt_InvalidDirection_ThrowsBeforeMutating()
+    {
+        var net = new BeltNetwork();
+        Assert.Throws<ArgumentOutOfRangeException>(() => net.AddBelt(0, 0, 4));
+        Assert.Equal(0, net.Capacity);              // no orphan line left in the pool
+        Assert.False(net.GetLineAt(0, 0).IsValid);  // no stale tile-index entry
+    }
+
+    [Fact]
     public void TwoNonAdjacentBelts_StayTwoLines()
     {
         var net = new BeltNetwork();
@@ -162,7 +171,8 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         net.AddBelt(5, 3, E);
-        net.AddBelt(6, 3, S);   // 上游邻格是 (5,3),但方向不同
+        // (5,3) 是 E 线的出口格 Tiles[0],但新格朝 S —— 方向不符,不应合并
+        net.AddBelt(5, 4, S);   // Delta(S)=(0,1) -> back=(5,3)
         Assert.Equal(2, LiveLines(net).Count);
     }
 
@@ -170,7 +180,8 @@ public class BeltNetworkTests
     public void PerpendicularNeighbour_DoesNotMerge()
     {
         var (net, _) = BuildEastLine((5, 3), (4, 3), (3, 3));
-        net.AddBelt(4, 2, E);   // 上/下游邻格 (5,2)/(3,2) 都不是那条线的端点
+        // (4,2) 的上/下游邻格 (3,2)/(5,2) 都是空的 —— 附近有线但不相邻,不应产生合并
+        net.AddBelt(4, 2, E);
         Assert.Equal(2, LiveLines(net).Count);
     }
 
@@ -204,19 +215,34 @@ public class BeltNetworkTests
     public void ThreeWayMerge_ConcatenatesItemsAtCorrectAbsolutePositions()
     {
         var net = new BeltNetwork();
-        var (_, downId) = EastLineOn(net, (6, 3), (5, 3));   // 长 512
-        var (_, upId)   = EastLineOn(net, (3, 3), (2, 3));   // 长 512
+        var (_, downId) = EastLineOn(net, (6, 3), (5, 3));            // 2 格,长 512
+        var (_, upId)   = EastLineOn(net, (3, 3), (2, 3), (1, 3));    // 3 格,长 768
 
-        net.GetLine(downId).LaneA.TryInsertAtBack();          // L_down.LaneA gaps=[448] -> abs [448]
-        net.GetLine(upId).LaneA.TryInsertAtBack();            // L_up.LaneA   gaps=[448] -> abs [448]
+        // L_down.LaneA: 一个物品 -> gaps [448], abs [448]
+        net.GetLine(downId).LaneA.TryInsertAtBack();
+        // L_up.LaneA: 插入 -> [704],Advance(200) -> [504],再插入 -> gaps [504,136], abs [504,704]
+        net.GetLine(upId).LaneA.TryInsertAtBack();
+        net.GetLine(upId).LaneA.Advance(200);
+        net.GetLine(upId).LaneA.TryInsertAtBack();
+        // L_down.LaneB: 一个物品 -> abs [448]
+        net.GetLine(downId).LaneB.TryInsertAtBack();
+        // L_up.LaneB: 一个物品 -> gaps [704], abs [704]
+        net.GetLine(upId).LaneB.TryInsertAtBack();
 
-        var id = net.AddBelt(4, 3, E);
-        var lane = net.GetLine(id).LaneA;
+        var id = net.AddBelt(4, 3, E);                                // 三路合并
+        var merged = net.GetLine(id);
 
-        // down 原样 [448];up 后移 256 + 512 = 768 -> [1216]
-        Assert.Equal(new[] { 448, 1216 }, lane.ToAbsolutePositions());
-        Assert.Equal(new[] { 448, 704 }, lane.Gaps);          // 448, 1216-448-64
-        Assert.Equal(1280, net.GetLine(id).LengthSubTiles);
+        // combinedLen = 768 + 256 + 512 = 1536; shift = 256 + 512 = 768
+        Assert.Equal(new[] { (6, 3), (5, 3), (4, 3), (3, 3), (2, 3), (1, 3) }, merged.Tiles);
+        Assert.Equal(1536, merged.LengthSubTiles);
+
+        // LaneA: down 448 原样;up 504->1272, 704->1472
+        Assert.Equal(new[] { 448, 1272, 1472 }, merged.LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 448, 760, 136 }, merged.LaneA.Gaps);
+
+        // LaneB: down 448 原样;up 704->1472
+        Assert.Equal(new[] { 448, 1472 }, merged.LaneB.ToAbsolutePositions());
+        Assert.Equal(new[] { 448, 960 }, merged.LaneB.Gaps);
     }
 
     [Fact]
