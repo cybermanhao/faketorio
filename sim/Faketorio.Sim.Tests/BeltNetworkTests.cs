@@ -173,4 +173,79 @@ public class BeltNetworkTests
         net.AddBelt(4, 2, E);   // 上/下游邻格 (5,2)/(3,2) 都不是那条线的端点
         Assert.Equal(2, LiveLines(net).Count);
     }
+
+    // 建一条 E 向线,tiles 前到后给出。第一格是出口。
+    private static (BeltNetwork net, BeltLineId id) EastLineOn(BeltNetwork net, params (int x, int y)[] frontToBack)
+    {
+        var id = net.AddBelt(frontToBack[0].x, frontToBack[0].y, E);
+        for (int i = 1; i < frontToBack.Length; i++)
+            id = net.AddBelt(frontToBack[i].x, frontToBack[i].y, E);
+        return (net, id);
+    }
+
+    [Fact]
+    public void AddBelt_FillsOneTileGapBetweenTwoLines_MergesAllThree()
+    {
+        var net = new BeltNetwork();
+        EastLineOn(net, (6, 3), (5, 3));           // L_down:出口 (6,3),入口 (5,3)
+        EastLineOn(net, (3, 3), (2, 3));           // L_up:  出口 (3,3),入口 (2,3)
+
+        var id = net.AddBelt(4, 3, E);             // 补空隙:上游邻格 (3,3)=L_up 出口,下游邻格 (5,3)=L_down 入口
+
+        Assert.Single(LiveLines(net));
+        var line = net.GetLine(id);
+        Assert.Equal(new[] { (6, 3), (5, 3), (4, 3), (3, 3), (2, 3) }, line.Tiles);
+        Assert.Equal(1280, line.LengthSubTiles);
+        foreach (var (tx, ty) in line.Tiles)
+            Assert.Equal(id, net.GetLineAt(tx, ty));
+    }
+
+    [Fact]
+    public void ThreeWayMerge_ConcatenatesItemsAtCorrectAbsolutePositions()
+    {
+        var net = new BeltNetwork();
+        var (_, downId) = EastLineOn(net, (6, 3), (5, 3));   // 长 512
+        var (_, upId)   = EastLineOn(net, (3, 3), (2, 3));   // 长 512
+
+        net.GetLine(downId).LaneA.TryInsertAtBack();          // L_down.LaneA gaps=[448] -> abs [448]
+        net.GetLine(upId).LaneA.TryInsertAtBack();            // L_up.LaneA   gaps=[448] -> abs [448]
+
+        var id = net.AddBelt(4, 3, E);
+        var lane = net.GetLine(id).LaneA;
+
+        // down 原样 [448];up 后移 256 + 512 = 768 -> [1216]
+        Assert.Equal(new[] { 448, 1216 }, lane.ToAbsolutePositions());
+        Assert.Equal(new[] { 448, 704 }, lane.Gaps);          // 448, 1216-448-64
+        Assert.Equal(1280, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void ThreeWayMerge_ReleasesAllThreeOldSlots()
+    {
+        var net = new BeltNetwork();
+        var (_, downId) = EastLineOn(net, (6, 3), (5, 3));
+        var (_, upId)   = EastLineOn(net, (3, 3), (2, 3));
+        var id = net.AddBelt(4, 3, E);
+
+        Assert.False(net.GetLineAt(4, 3).Equals(BeltLineId.Invalid)); // 新线有效
+        Assert.Single(LiveLines(net));
+        Assert.Equal(id, net.GetLineAt(2, 3));
+        Assert.Equal(id, net.GetLineAt(6, 3));
+        Assert.NotEqual(id, downId);
+        Assert.NotEqual(id, upId);
+    }
+
+    [Fact]
+    public void ThreeWayMerge_Deterministic()
+    {
+        BeltNetwork Build()
+        {
+            var n = new BeltNetwork();
+            EastLineOn(n, (6, 3), (5, 3));
+            EastLineOn(n, (3, 3), (2, 3));
+            n.AddBelt(4, 3, E);
+            return n;
+        }
+        Assert.Equal(Hash(Build()), Hash(Build()));
+    }
 }

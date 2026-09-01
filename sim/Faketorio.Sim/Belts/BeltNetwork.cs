@@ -43,7 +43,29 @@ public sealed class BeltNetwork
             && _pool.Get(fId).Tiles[^1] == front;
 
         if (bHit && fHit)
-            return tid; // Task 5:三路合并
+        {
+            var lUp = _pool.Get(bId);
+            var lDown = _pool.Get(fId);
+            int combinedLen = lUp.LengthSubTiles + BeltLine.TileSubTiles + lDown.LengthSubTiles;
+
+            var newA = ConcatLanes(lUp.LaneA, lDown.LaneA, lDown.LengthSubTiles, combinedLen);
+            var newB = ConcatLanes(lUp.LaneB, lDown.LaneB, lDown.LengthSubTiles, combinedLen);
+
+            var newTiles = new List<(int X, int Y)>(lDown.Tiles.Count + 1 + lUp.Tiles.Count);
+            newTiles.AddRange(lDown.Tiles);
+            newTiles.Add((x, y));
+            newTiles.AddRange(lUp.Tiles);
+
+            var merged = new BeltLine(direction, newTiles, newA, newB);
+            var newId = _pool.Create(merged);
+            foreach (var (tx, ty) in newTiles)
+                _tiles.Set(tx, ty, newId);
+
+            _pool.Destroy(bId);
+            _pool.Destroy(fId);
+            _pool.Destroy(tid);
+            return newId;
+        }
 
         if (bHit)
         {
@@ -91,6 +113,21 @@ public sealed class BeltNetwork
             line.LaneA.WriteState(writer);
             line.LaneB.WriteState(writer);
         }
+    }
+
+    // 把 up(上游,拼在物理后侧)与 down(下游,拼在出口侧)两条带物品的
+    // lane 拼成一条长 combinedLen 的新 lane。前沿绝对距离:down 的原样,
+    // up 的每项整体后移 (256 + downLen)——越过新格 T 和整条 down。
+    // 拼出的列表天然升序(up 最靠前项移位后仍远在 down 最靠后项之后),
+    // 直接交给 FromAbsolutePositions。
+    private static BeltLane ConcatLanes(BeltLane up, BeltLane down, int downLen, int combinedLen)
+    {
+        var pos = new List<int>(down.Count + up.Count);
+        pos.AddRange(down.ToAbsolutePositions());
+        int shift = BeltLine.TileSubTiles + downLen;
+        foreach (int p in up.ToAbsolutePositions())
+            pos.Add(p + shift);
+        return BeltLane.FromAbsolutePositions(combinedLen, pos);
     }
 
     // 方向 -> 单位位移。屏幕坐标(y 向下):北 = -y,南 = +y。
