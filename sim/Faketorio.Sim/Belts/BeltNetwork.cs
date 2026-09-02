@@ -134,9 +134,10 @@ public sealed class BeltNetwork
 
         if (n == 1)
         {
+            int count = line.LaneA.Count + line.LaneB.Count;
             _pool.Destroy(id);
             _tiles.Clear(x, y);
-            return 0;
+            return count;
         }
 
         if (k == 0) // 出口端
