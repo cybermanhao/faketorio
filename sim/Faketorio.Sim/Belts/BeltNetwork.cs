@@ -160,7 +160,7 @@ public sealed class BeltNetwork
             return count;
         }
 
-        throw new NotSupportedException("middle split: Task 3");
+        return MiddleSplit(line, k, n, x, y);
     }
 
     // 循环把前沿落在 [from, to) 内的物品从 lane 摘除,返回摘除数。
@@ -169,6 +169,48 @@ public sealed class BeltNetwork
         int c = 0;
         while (lane.TryRemoveItemInRange(from, to)) c++;
         return c;
+    }
+
+    // 中间拆分:被移格下标 0 < k < n-1。前半段(原线,id 不变)就地 ShrinkBack;
+    // 后半段(全新线)从快照重建,出口落在 (k+1)*L 亚格边界。返回丢弃物品数。
+    private int MiddleSplit(BeltLine line, int k, int n, int x, int y)
+    {
+        const int L = BeltLine.TileSubTiles;
+        const int W = BeltLane.ItemWidthSubTiles;
+        int cut = (k + 1) * L;
+        int backLen = (n - 1 - k) * L;
+
+        // 1) 后半段:前沿 >= cut 的物品,前沿减 cut(在原线被 mutate 之前读快照)
+        var backA = SplitBackLane(line.LaneA, cut, backLen);
+        var backB = SplitBackLane(line.LaneB, cut, backLen);
+        var backTiles = line.Tiles.GetRange(k + 1, n - 1 - k);
+        var backId = _pool.Create(new BeltLine(line.Direction, backTiles, backA, backB));
+        foreach (var (tx, ty) in backTiles)
+            _tiles.Set(tx, ty, backId);
+
+        // 2) 前半段:原线。先移走去后半段的(不计数),再丢弃跨界/被移格上的(计数)
+        int discarded = 0;
+        foreach (var lane in new[] { line.LaneA, line.LaneB })
+        {
+            while (lane.TryRemoveItemInRange(cut, n * L)) { }
+            while (lane.TryRemoveItemInRange(k * L - (W - 1), n * L)) discarded++;
+            lane.ShrinkBack((n - k) * L);
+        }
+        line.Tiles.RemoveRange(k, n - k);
+
+        // 3) 被移格
+        _tiles.Clear(x, y);
+        return discarded;
+    }
+
+    // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
+    // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
+    private static BeltLane SplitBackLane(BeltLane src, int cut, int backLen)
+    {
+        var back = new List<int>();
+        foreach (int p in src.ToAbsolutePositions())
+            if (p >= cut) back.Add(p - cut);
+        return BeltLane.FromAbsolutePositions(backLen, back);
     }
 
     // 把 up(上游,拼在物理后侧)与 down(下游,拼在出口侧)两条带物品的
