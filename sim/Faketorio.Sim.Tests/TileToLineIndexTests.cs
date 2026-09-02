@@ -39,4 +39,21 @@ public class TileToLineIndexTests
         Assert.Equal(B, ix.Get(-33, -33));
         Assert.Equal(BeltLineId.Invalid, ix.Get(-32, -32));
     }
+
+    [Fact]
+    public void Clear_RemovesEntry()
+    {
+        var ix = new TileToLineIndex();
+        ix.Set(5, 5, new BeltLineId(2, 1));
+        ix.Clear(5, 5);
+        Assert.Equal(BeltLineId.Invalid, ix.Get(5, 5));
+    }
+
+    [Fact]
+    public void Clear_UnsetTile_IsNoOp()
+    {
+        var ix = new TileToLineIndex();
+        ix.Clear(9, 9); // 不抛
+        Assert.Equal(BeltLineId.Invalid, ix.Get(9, 9));
+    }
 }
