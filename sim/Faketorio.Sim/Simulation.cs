@@ -1,3 +1,4 @@
+using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Prototypes;
@@ -11,6 +12,7 @@ public sealed class Simulation
     public PrototypeRegistry Prototypes { get; }
     public WorldGrid World { get; } = new();
     public EntityPool<EntityData> Entities { get; } = new();
+    public BeltNetwork Belts { get; } = new();
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
 
@@ -91,6 +93,8 @@ public sealed class Simulation
                     Rotation = command.Rotation,
                 });
                 World.OccupyArea(command.X, command.Y, proto.TileWidth, proto.TileHeight, id);
+                if (proto is TransportBeltPrototype)
+                    Belts.AddBelt(command.X, command.Y, command.Rotation);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -107,8 +111,12 @@ public sealed class Simulation
                     RejectedCommandCount++;
                     return;
                 }
+                int bx = data.X, by = data.Y;
+                bool isBelt = proto is TransportBeltPrototype;
                 World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
                 Entities.Destroy(id);
+                if (isBelt)
+                    Belts.RemoveBelt(bx, by);
                 return;
             }
             default:

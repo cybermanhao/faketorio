@@ -230,7 +230,7 @@ public sealed class BeltNetwork
     }
 
     // 方向 -> 单位位移。屏幕坐标(y 向下):北 = -y,南 = +y。
-    private static (int dx, int dy) Delta(byte d) => d switch
+    public static (int dx, int dy) Delta(byte d) => d switch
     {
         0 => (0, -1),
         1 => (1, 0),

@@ -1,3 +1,4 @@
+using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Prototypes;
@@ -139,5 +140,72 @@ public class SimulationTests
         sim.Step();
         Assert.Equal(1, sim.RejectedCommandCount);
         Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
+    }
+
+    private const byte E = 1;
+
+    private static Command PlaceBelt(Simulation sim, int x, int y, byte rot) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+        X = x, Y = y, Rotation = rot,
+    };
+
+    private static int LiveLineCount(BeltNetwork b)
+    {
+        int c = 0;
+        for (int i = 0; i < b.Capacity; i++) if (b.IsAliveAtIndex(i)) c++;
+        return c;
+    }
+
+    [Fact]
+    public void PlaceBelt_RegistersLineInNetwork()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 5, E));
+        sim.Step();
+        var id = sim.Belts.GetLineAt(5, 5);
+        Assert.True(id.IsValid);
+        Assert.Equal(new[] { (5, 5) }, sim.Belts.GetLine(id).Tiles);
+    }
+
+    [Fact]
+    public void PlaceTwoAdjacentSameDirBelts_MergeToOneLine()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 5, E));
+        sim.Step();
+        sim.Submit(PlaceBelt(sim, 6, 5, E));
+        sim.Step();
+        Assert.Equal(1, LiveLineCount(sim.Belts));
+        var id = sim.Belts.GetLineAt(5, 5);
+        Assert.Equal(new[] { (6, 5), (5, 5) }, sim.Belts.GetLine(id).Tiles);
+    }
+
+    [Fact]
+    public void RemoveMiddleBelt_SplitsNetworkLine()
+    {
+        var sim = NewSim();
+        foreach (var x in new[] { 5, 6, 7 }) { sim.Submit(PlaceBelt(sim, x, 5, E)); sim.Step(); }
+        Assert.Equal(1, LiveLineCount(sim.Belts));
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 6, Y = 5 });
+        sim.Step();
+
+        Assert.Equal(2, LiveLineCount(sim.Belts));
+        Assert.False(sim.Belts.GetLineAt(6, 5).IsValid);
+        Assert.False(sim.World.GetEntityAt(6, 5).IsValid);
+    }
+
+    [Fact]
+    public void RemoveNonBeltEntity_DoesNotTouchNetwork()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 0));
+        sim.Step();
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 0, Y = 0 });
+        sim.Step(); // isBelt 守卫:不得抛
+        Assert.Equal(0, LiveLineCount(sim.Belts));
+        Assert.Equal(0, sim.RejectedCommandCount);
     }
 }
