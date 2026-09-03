@@ -51,7 +51,7 @@ BeltLine {
 - **`BeltLineId(int Index, int Generation)`**:`readonly record struct`,与 `EntityId` 同构——句柄 = 槽位 + 代数,用前校验代数一致以拦截"指向已删除并被复用的槽位"。
 - **`BeltLinePool`**:装 `BeltLine`(引用类型)的池。分配器与 Plan 1 的 `EntityPool<T>` 同思路(高水位 `_count`、空闲下标栈、平行 `_generations` 偶死奇活、`Create`/`Destroy`/`IsAlive`/按索引序遍历/`WriteState`)。现有的 `EntityPool<T> where T : struct` **不改**(已合并、已测);分配器簿记若能干净抽成共享 helper 就抽,抽不干净则 `BeltLinePool` 带一份带注释的平行实现——确定性簿记只有一处真理。
 - **`BeltNetwork`**:新类型,持有 `BeltLinePool` + 一个 **`tile → BeltLineId` 的分块稀疏索引**(行主序数组,分块方式与 `WorldGrid.Chunk` 一致,不用 `Dictionary`,避免非确定遍历)。公开 `AddBelt((x,y), dir, proto)`(触发合并)、按池索引序遍历、`WriteState`。合并的端点判定只查这个 tile 索引。
-- 设计文档提到的另一个 **`EntityId → 线` 稀疏数组**,仅在 3d 接入 `Simulation`、处理"按传送带实体 ID 拆除"时才需要,推到 3d 再加。Plan 3b 的 `BeltNetwork` 只有 tile 索引。
+- 本节早先设想的 **`EntityId → 线` 稀疏数组**,3d 评审时**取消**:3d 的所有接入都是按坐标的(`Simulation.Apply` 已用命令的 `(X,Y)` 查实体;线间交接解析前方邻格坐标),`tile → BeltLineId` 索引已足够。等机械臂计划里"手里握着带子 `EntityId` 想反查线"的需求出现时再加。`BeltNetwork` 只有 tile 索引。
 
 ## 5. 合并算法
 
@@ -103,23 +103,32 @@ BeltLine {
 
 ## 7. 每 tick 系统更新
 
-`Simulation.Step()` 在命令应用之后新增两步:
+`Simulation.Step()` 在命令应用之后、`Tick++` 之前,**在 `Step` 里直接编排**两趟(不新增 `BeltNetwork.Advance` 方法;`BeltNetwork` 只把 `Delta(byte) → (dx,dy)` 暴露成 `public static`,其余靠 3b 已有的 `Capacity`/`IsAliveAtIndex`/`GetAtIndex`/`GetLineAt`/`GetLine`)。两趟都按 `BeltLine` 池的索引序(与 `WriteState` 遍历一致)。
 
-**1. 推进**:按 `BeltLine` 池的索引序(与 `WriteState` 遍历方式一致)遍历所有存活的线,对每条线的 `LaneA`/`LaneB` 各调用一次 `Advance(speed)`。
+**1. 推进**:每条存活线,`int speed = ResolveBeltSpeed(line);` 然后 `line.LaneA.Advance(speed)`、`line.LaneB.Advance(speed)`。
 
-`speed` 取自**该线出口格**(`Tiles[0]`)的传送带 `TransportBeltPrototype.SpeedSubTilesPerTick`(Plan 2 已定义;沿用 Plan 2 的约束:该值应整除 `ItemWidthSubTiles`=64,否则 `Advance` 丢弃当 tick 剩余推进量会造成微小吞吐损耗)。合并不要求同 prototype(第 5 节),一条线可能跨越不同速度的格子——本设计的既定行为是**整条线按出口格速度跑**,不模拟"物品进入慢段减速"。精确分段速度留给分离器 / 多带种计划;M1 的基准与测试场景用单一带种,不触发这个近似。
+`ResolveBeltSpeed(BeltLine line)` 是 `Simulation` 的私有方法,按 `line.Tiles[0]`(出口格)→ `World.GetEntityAt` → `Entities.Get().ProtoId` → `Prototypes` → `((TransportBeltPrototype)p).SpeedSubTilesPerTick` 解析(严格,靠"出口格上一定是传送带实体"的不变式,不做 fallback)。沿用 Plan 2 的约束:该值应整除 `ItemWidthSubTiles`=64。合并不要求同 prototype(第 5 节),一条线可能跨越不同速度的格子——本设计的既定行为是**整条线按出口格速度跑**,不模拟"物品进入慢段减速"。精确分段速度留给分离器 / 多带种计划;M1 的基准与测试场景用单一带种,不触发这个近似。
 
-**2. 线间交接(最简版)**:推进之后,再按池索引序遍历每条线,解析它出口格 `Tiles[0]` 的"前方邻格"——若该格属于另一条线 D 的入口端,则对 A/B 两条 lane 各做:
-`while (本线.LaneX.IsFrontReady && D.LaneX.TryInsertAtBack()) 本线.LaneX.RemoveFront();`
-前方邻格通过 `WorldGrid.GetEntityAt` + `EntityId → 线` 稀疏数组解析,不存下游引用(避免悬垂)。`TryInsertAtBack` 自带 64 亚格间距校验:下游空带时一次 tick 可搬多个物品(符合"空带自由铺入"),下游满带时自然停在 `IsFrontReady`。
+**2. 线间交接(最简版)**:推进之后,再遍历每条线,解析它出口格 `Tiles[0]` 的"前方邻格" `front = Tiles[0] + BeltNetwork.Delta(line.Direction)`;`dId = Belts.GetLineAt(front)`;若 `dId` 有效、`down = Belts.GetLine(dId)` 满足 `down.Direction == line.Direction` 且 `down.Tiles[^1] == front`(`front` 正是下游线的入口端),则对 A/B 两条 lane 各做:
+`while (line.LaneX.IsFrontReady && down.LaneX.TryInsertAtBack()) line.LaneX.RemoveFront();`
+前方邻格只通过 `Belts.GetLineAt` 解析(tile 索引),不存下游引用(避免悬垂),不需要 `EntityId → 线`。`TryInsertAtBack` 自带 64 亚格间距校验:下游空带时一次 tick 可搬多个物品(符合"空带自由铺入"),下游满带时自然停在 `IsFrontReady`。
 
 遍历序固定(池索引),所以完全确定。顺序确实影响"某物品这一 tick 还是下一 tick 过界"(链式 A→B→C 中,先处理 A 可能让一个物品一 tick 内连过两个边界,仅在带子近空时发生),但序固定 ⇒ 回放必然复现,不需要拓扑排序。真正的线尾(没有下游线,也还没有机械臂 / 箱子接入)物品停在 `gaps[0]==0`,`IsFrontReady` 就是等待信号。
 
 **环形回路**就是这一步的一个闭合特例:矩形/任意闭环 = 若干直线 `BeltLine` 首尾相接成一圈(拐角格因方向不同各自成线),交接沿环一段段传。环没塞满时物品持续循环;环整圈塞满时,每条线出口都堵、前方线都收不下,整环冻住——`while` 条件自然给出这个结果,不需要额外的环检测。
 
-## 8. `IStateWriter` 覆盖
+## 8. `IStateWriter` 覆盖 + `Simulation` 接线(Plan 3d)
 
-`Simulation.WriteState` 追加:按 `BeltLine` 池索引序,依次写每条线的 `Direction`、`Tiles`(数量+每格坐标,确定顺序)、`LaneA`/`LaneB` 的 `WriteState` 输出(第 3 节;gap 数量 + gap 列表,不含 `_openIndex`)。
+**`Simulation.WriteState`**:在 `WorldGrid` 那段之后加一行 `Belts.WriteState(writer);`。`BeltNetwork.WriteState`(3b 已实现)先写分配器簿记,再按池索引序写每条线的 `Direction`、`Tiles`(数量+每格坐标,确定顺序)、`LaneA`/`LaneB` 的 `WriteState`(第 3 节;gap 数量 + gap 列表,不含 `_openIndex`)。
+
+**`Simulation` 其余接线**:
+
+- 新增 `public BeltNetwork Belts { get; } = new();`
+- `Apply` / `PlaceEntity`:`World.OccupyArea` 成功后,若 `proto is TransportBeltPrototype` → `Belts.AddBelt(command.X, command.Y, command.Rotation)`(返回值忽略;tile 索引与合并在 `AddBelt` 内部完成)。
+- `Apply` / `RemoveEntity`:在 `Entities.Destroy(id)` **之前**把要用的东西抓出来——`(x, y) = (data.X, data.Y)`、`bool isBelt = proto is TransportBeltPrototype`(`data` 在 `Destroy` 后失效,不能事后再读);既有的 `World.ClearArea` + `Entities.Destroy` 照跑;然后若 `isBelt` → `Belts.RemoveBelt(x, y)`(返回的丢弃计数忽略——M1 无背包,第 10 节的策略层落地前实际效果就是丢弃)。belt 后处理排在既有实体移除逻辑之后(第 10 节)。
+- `Step`:命令应用之后、`Tick++` 之前,执行第 7 节的两趟(推进 + 线间交接)。
+
+`Command.Rotation`(0/1/2/3=北/东/南/西)直接作为 `AddBelt` 的 `direction`;`EntityData.Rotation` 已存这个值,无需改动。
 
 ## 9. 明确不做(留给更后续的计划)
 
@@ -142,7 +151,7 @@ BeltLine {
 
 - **Plan 3a**(已合并):`BeltLane` 新增能力(`ExtendBack`/`ExtendFront`/`ToAbsolutePositions`/`FromAbsolutePositions`/`TryRemoveItemInRange`/`WriteState`)+ 独立单测。
 - **Plan 3b**(已合并):`BeltLineId` + `BeltLinePool`(引用类型池,分配器同 `EntityPool<T>` 思路,不改既有 struct 池)+ `BeltLine` 数据结构 + `BeltNetwork`(持有池 + `tile → BeltLineId` 分块索引)+ `AddBelt` 合并算法(单侧 / 三路 / 都不接)+ 独立单测。
-- **Plan 3c**:`BeltLane.ShrinkBack`/`ShrinkFront`(第 3 节,含 fail-fast 守卫)+ `TileToLineIndex.Clear` + `BeltNetwork.RemoveBelt`(第 6 节:`n==1` / 出口端 / 入口端 / 中间拆分四种;端点与前半段就地 `Shrink`,后半段全新线;断口跨界物品清除范围向前拓宽 `W-1`;返回被清物品计数)+ 独立单测(含"跨界物品被清"、"后半段物品绝对位置正确"、"前半段 id 不变 / 后半段新 id / tile 索引一致"、拆分确定性)。不碰 `Simulation`。
-- **Plan 3d**:接入 `Simulation`(放置/拆除触发合并拆分、`EntityId → 线` 反查数组、每 tick 推进 + 线间交接最简版、`IStateWriter`)+ 贯通集成测试(L 形拐弯两条线的物品交接;矩形环的循环与塞满冻结)+ 确定性测试(含存档/读档后 `_openIndex` 归零仍哈希一致)
+- **Plan 3c**(已合并):`BeltLane.ShrinkBack`/`ShrinkFront`(第 3 节,含 fail-fast 守卫)+ `TileToLineIndex.Clear` + `BeltNetwork.RemoveBelt`(第 6 节四分支;端点与前半段就地 `Shrink`,后半段全新线;断口跨界物品清除范围向前拓宽 `W-1`;返回被清物品计数)+ 独立单测。
+- **Plan 3d**:接入 `Simulation`(第 8 节)——`Belts` 属性;`Apply` 的 `PlaceEntity`/`RemoveEntity` 对传送带调 `AddBelt`/`RemoveBelt`;`Step` 里编排第 7 节的推进 + 线间交接(`BeltNetwork.Delta` 暴露为 `public static`,`ResolveBeltSpeed` 私有);`WriteState` 追加 `Belts.WriteState`。**不做** `EntityId → 线` 反查(3d 评审取消,见第 4 节)。测试:确定性(扩 `DeterminismTests`:放一串带子 + 中间拆一格 + 补一格触发合并 + 多 tick,两遍 hash 全等)、L 形拐弯两条线的物品交接集成测试、矩形环的循环与塞满冻结集成测试。(存档/读档后 `_openIndex` 归零仍哈希一致——已由 3a 的 `WriteState` 单测覆盖:堵塞态 lane vs `FromAbsolutePositions` 重建的 lane 哈希相等;M2 有真存读档时再补 `Simulation` 级往返测试。)
 
 每个计划都走完整的"实现→审查→(修复→复审)"闭环,前一个合并进 `main` 后再规划下一个的具体任务清单(避免过早锁定后面计划的细节,给中途发现的问题留调整空间)。
