@@ -35,4 +35,7 @@ public sealed class TileToLineIndex
         }
         c[TileIndex(x, y)] = id;
     }
+
+    // 清掉某格的记录(拆除传送带时用)。等价于 Set(x, y, Invalid)。
+    public void Clear(int x, int y) => Set(x, y, BeltLineId.Invalid);
 }

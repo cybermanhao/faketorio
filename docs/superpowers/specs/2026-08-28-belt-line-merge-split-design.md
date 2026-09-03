@@ -84,7 +84,7 @@ BeltLine {
 
 `BeltNetwork.RemoveBelt(int x, int y)`:`_tiles.Get(x,y)` 找到线,线性扫 `line.Tiles` 拿到该格下标 `k` 与 `n = Tiles.Count`。被清下来的物品先摘下并**计数**——去向(丢弃 / 掉地上 / 进玩家背包)不是本设计决定的,见第 10 节。设 `L = BeltLine.TileSubTiles`(256)、`W = ItemWidthSubTiles`(64)。
 
-- **`n == 1`**:`_pool.Destroy` 整条线,`_tiles.Clear(x,y)`。
+- **`n == 1`**:`_pool.Destroy` 整条线,`_tiles.Clear(x,y)`,返回两条 lane 的物品数之和(`LaneA.Count + LaneB.Count`——它们随线一起销毁,全部计入丢弃)。
 - **`k == 0`(出口端)**:两条 lane 各 `while (lane.TryRemoveItemInRange(0, L)) count++;` 清掉该格上的物品,再各 `ShrinkFront(L)`,`Tiles.RemoveAt(0)`。**线 id 不变**,`_tiles.Clear(x,y)`。
 - **`k == n-1`(入口端)**:两条 lane 各 `while (lane.TryRemoveItemInRange((n-1)*L - (W-1), n*L)) count++;` ——低端向前拓宽 `W-1`,把"前沿在上一格、身体跨进被移格"的物品也清掉(否则 `ShrinkBack` 会把它截飞)。再各 `ShrinkBack(L)`,`Tiles.RemoveAt(n-1)`。id 不变,`_tiles.Clear(x,y)`。
   ——这修正了本节旧文"入口端摘除只需缩短长度":不先清物品会把它们截飞。

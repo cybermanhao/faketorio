@@ -274,4 +274,225 @@ public class BeltNetworkTests
         }
         Assert.Equal(Hash(Build()), Hash(Build()));
     }
+
+    [Fact]
+    public void RemoveBelt_SingleTileLine_DestroysIt()
+    {
+        var net = new BeltNetwork();
+        net.AddBelt(5, 5, E);
+        int discarded = net.RemoveBelt(5, 5);
+        Assert.Equal(0, discarded);
+        Assert.Empty(LiveLines(net));
+        Assert.False(net.GetLineAt(5, 5).IsValid);
+    }
+
+    [Fact]
+    public void RemoveBelt_ExitEndpoint_ShrinksLineKeepsId()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768, exit (5,3)
+        int discarded = net.RemoveBelt(5, 3);
+        Assert.Equal(0, discarded);
+        Assert.Single(LiveLines(net));
+        var line = net.GetLine(id);                // 同一 id 仍存活
+        Assert.Equal(new[] { (4, 3), (3, 3) }, line.Tiles);
+        Assert.Equal(512, line.LengthSubTiles);
+        Assert.False(net.GetLineAt(5, 3).IsValid);
+        Assert.Equal(id, net.GetLineAt(4, 3));
+    }
+
+    [Fact]
+    public void RemoveBelt_EntryEndpoint_ShrinksLineKeepsId()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // entry (3,3), k = 2 = n-1
+        int discarded = net.RemoveBelt(3, 3);
+        Assert.Equal(0, discarded);
+        var line = net.GetLine(id);
+        Assert.Equal(new[] { (5, 3), (4, 3) }, line.Tiles);
+        Assert.Equal(512, line.LengthSubTiles);
+        Assert.False(net.GetLineAt(3, 3).IsValid);
+    }
+
+    [Fact]
+    public void RemoveBelt_ExitEndpoint_DiscardsItemOnRemovedTile_AndCounts()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack();   // gaps=[704]
+        lane.Advance(704);         // gaps=[0],物品贴在出口(前沿 0,在出口格 [0,256))
+        int discarded = net.RemoveBelt(5, 3);
+        Assert.Equal(1, discarded);
+        Assert.Equal(0, net.GetLine(id).LaneA.Count);
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void RemoveBelt_EntryEndpoint_DiscardsBodyStraddler_AndCounts()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768, k=2 removes tile [512,768)
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack();   // gaps=[704],abs 704
+        lane.Advance(222);         // gaps=[482],abs 482:身体 [482,546] 从 tile (4,3) 跨进 (3,3)
+        int discarded = net.RemoveBelt(3, 3);
+        Assert.Equal(1, discarded); // 前沿 482 ∈ [512-63, 768) = [449,768) → 被清
+        Assert.Equal(0, net.GetLine(id).LaneA.Count);
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void RemoveBelt_Endpoint_IsDeterministic()
+    {
+        BeltNetwork Build()
+        {
+            var n = new BeltNetwork();
+            EastLineOn(n, (5, 3), (4, 3), (3, 3));
+            n.RemoveBelt(5, 3);
+            return n;
+        }
+        Assert.Equal(Hash(Build()), Hash(Build()));
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_SplitsIntoTwoLines()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // 5 tiles, len 1280
+        int discarded = net.RemoveBelt(4, 3); // k = 2, n = 5
+
+        Assert.Equal(0, discarded);
+        Assert.Equal(2, LiveLines(net).Count);
+
+        var front = net.GetLine(id);                       // 原 id 仍存活
+        Assert.Equal(new[] { (6, 3), (5, 3) }, front.Tiles);
+        Assert.Equal(512, front.LengthSubTiles);
+
+        var backId = net.GetLineAt(3, 3);
+        Assert.NotEqual(id, backId);
+        var back = net.GetLine(backId);
+        Assert.Equal(new[] { (3, 3), (2, 3) }, back.Tiles);
+        Assert.Equal(512, back.LengthSubTiles);
+
+        Assert.False(net.GetLineAt(4, 3).IsValid);
+        Assert.Equal(id, net.GetLineAt(6, 3));
+        Assert.Equal(backId, net.GetLineAt(2, 3));
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_BackHalfItemGetsCorrectAbsolutePosition()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        net.GetLine(id).LaneA.TryInsertAtBack(); // gaps=[1216],abs 1216(在 tile (2,3))
+
+        net.RemoveBelt(4, 3); // k=2,cut = 3*256 = 768
+        var backId = net.GetLineAt(2, 3);
+
+        // 1216 >= 768 → 后半段,新前沿 1216 - 768 = 448
+        Assert.Equal(new[] { 448 }, net.GetLine(backId).LaneA.ToAbsolutePositions());
+        Assert.Equal(0, net.GetLine(id).LaneA.Count); // 前半段没物品
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_ItemOnRemovedTile_DiscardedAndCounted()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack(); // gaps=[1216]
+        lane.Advance(576);       // gaps=[640],abs 640:落在被移格 tile 2 = [512,768)
+
+        int discarded = net.RemoveBelt(4, 3);
+        Assert.Equal(1, discarded);
+        var backId = net.GetLineAt(2, 3);
+        Assert.Equal(0, net.GetLine(id).LaneA.Count);
+        Assert.Equal(0, net.GetLine(backId).LaneA.Count);
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_SeamStraddler_DiscardedAndCounted()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack(); // gaps=[1216]
+        lane.Advance(726);       // gaps=[490],abs 490:前沿在 tile 1 [256,512),身体 [490,554] 跨进被移格
+
+        int discarded = net.RemoveBelt(4, 3); // 若清除区间不向前拓宽 W-1,这个物品会留在前半段,ShrinkBack 会抛
+        Assert.Equal(1, discarded);
+        Assert.Equal(0, net.GetLine(id).LaneA.Count);
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_IsDeterministic()
+    {
+        BeltNetwork Build()
+        {
+            var n = new BeltNetwork();
+            EastLineOn(n, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3));
+            n.RemoveBelt(4, 3);
+            return n;
+        }
+        Assert.Equal(Hash(Build()), Hash(Build()));
+    }
+
+    [Fact]
+    public void RemoveBelt_SingleTileLine_CountsDestroyedItems()
+    {
+        var net = new BeltNetwork();
+        var id = net.AddBelt(5, 5, E);
+        var line = net.GetLine(id);
+        line.LaneA.TryInsertAtBack(); line.LaneA.Advance(128); line.LaneA.TryInsertAtBack(); // 2 on LaneA
+        line.LaneB.TryInsertAtBack();                                                        // 1 on LaneB
+        Assert.Equal(3, net.RemoveBelt(5, 5));
+        Assert.Empty(LiveLines(net));
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_BackHalfLanesAreIndependent()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        net.GetLine(id).LaneA.TryInsertAtBack();          // LaneA abs 1216
+        net.GetLine(id).LaneB.TryInsertAtBack();          // LaneB abs 1216
+        net.GetLine(id).LaneB.Advance(320);               // LaneB abs 896
+
+        net.RemoveBelt(4, 3);                             // k=2, cut = 768
+        var back = net.GetLine(net.GetLineAt(2, 3));
+
+        Assert.Equal(new[] { 448 }, back.LaneA.ToAbsolutePositions()); // 1216 - 768
+        Assert.Equal(new[] { 128 }, back.LaneB.ToAbsolutePositions()); // 896 - 768
+    }
+
+    [Fact]
+    public void RemoveBelt_EntryEndpoint_ItemJustClearOfRemovedTile_Survives()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768, remove entry (3,3): k=2=n-1
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack();  // gaps=[704]
+        lane.Advance(256);        // gaps=[448]:身体 [448,512) 全在 tile (4,3),不碰被移格
+        int discarded = net.RemoveBelt(3, 3);
+        Assert.Equal(0, discarded);
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+    }
+
+    [Fact]
+    public void RemoveBelt_MiddleTile_FrontHalfItemJustClearOfSeam_Survives()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        var lane = net.GetLine(id).LaneA;
+        lane.TryInsertAtBack();  // gaps=[1216]
+        lane.Advance(768);        // gaps=[448]:身体 [448,512) 全在 tile (5,3),不碰被移格 (4,3)
+        int discarded = net.RemoveBelt(4, 3); // k=2, front half len 512
+        Assert.Equal(0, discarded);
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions()); // 仍在前半段
+        Assert.Equal(512, net.GetLine(id).LengthSubTiles);
+        Assert.Equal(0, net.GetLine(net.GetLineAt(2, 3)).LaneA.Count);            // 后半段空
+    }
 }

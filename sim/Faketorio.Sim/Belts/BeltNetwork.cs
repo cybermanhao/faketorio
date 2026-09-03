@@ -118,6 +118,102 @@ public sealed class BeltNetwork
         }
     }
 
+    // 拆除 (x, y) 这格传送带。返回被丢弃物品的总个数(两条 lane 合计)。
+    // 前置条件:(x, y) 属于一条存活线(见 Global Constraints)。
+    // 端点摘除与中间拆分的前半段就地截短(id 不变);只有中间拆分的后半段是
+    // 全新线。断口处身体跨进被移格的物品按丢弃处理(见设计文档第 6 / 10 节)。
+    public int RemoveBelt(int x, int y)
+    {
+        const int L = BeltLine.TileSubTiles;
+        const int W = BeltLane.ItemWidthSubTiles;
+
+        var id = _tiles.Get(x, y);
+        var line = _pool.Get(id);
+        int n = line.Tiles.Count;
+        int k = line.Tiles.IndexOf((x, y));
+
+        if (n == 1)
+        {
+            int count = line.LaneA.Count + line.LaneB.Count;
+            _pool.Destroy(id);
+            _tiles.Clear(x, y);
+            return count;
+        }
+
+        if (k == 0) // 出口端
+        {
+            int count = ClearRange(line.LaneA, 0, L) + ClearRange(line.LaneB, 0, L);
+            line.LaneA.ShrinkFront(L);
+            line.LaneB.ShrinkFront(L);
+            line.Tiles.RemoveAt(0);
+            _tiles.Clear(x, y);
+            return count;
+        }
+
+        if (k == n - 1) // 入口端:低端向前拓宽 W-1,收身体跨进被移格的物品
+        {
+            int lo = (n - 1) * L - (W - 1);
+            int count = ClearRange(line.LaneA, lo, n * L) + ClearRange(line.LaneB, lo, n * L);
+            line.LaneA.ShrinkBack(L);
+            line.LaneB.ShrinkBack(L);
+            line.Tiles.RemoveAt(n - 1);
+            _tiles.Clear(x, y);
+            return count;
+        }
+
+        return MiddleSplit(line, k, n, x, y);
+    }
+
+    // 循环把前沿落在 [from, to) 内的物品从 lane 摘除,返回摘除数。
+    private static int ClearRange(BeltLane lane, int from, int to)
+    {
+        int c = 0;
+        while (lane.TryRemoveItemInRange(from, to)) c++;
+        return c;
+    }
+
+    // 中间拆分:被移格下标 0 < k < n-1。前半段(原线,id 不变)就地 ShrinkBack;
+    // 后半段(全新线)从快照重建,出口落在 (k+1)*L 亚格边界。返回丢弃物品数。
+    private int MiddleSplit(BeltLine line, int k, int n, int x, int y)
+    {
+        const int L = BeltLine.TileSubTiles;
+        const int W = BeltLane.ItemWidthSubTiles;
+        int cut = (k + 1) * L;
+        int backLen = (n - 1 - k) * L;
+
+        // 1) 后半段:前沿 >= cut 的物品,前沿减 cut(在原线被 mutate 之前读快照)
+        var backA = SplitBackLane(line.LaneA, cut, backLen);
+        var backB = SplitBackLane(line.LaneB, cut, backLen);
+        var backTiles = line.Tiles.GetRange(k + 1, n - 1 - k);
+        var backId = _pool.Create(new BeltLine(line.Direction, backTiles, backA, backB));
+        foreach (var (tx, ty) in backTiles)
+            _tiles.Set(tx, ty, backId);
+
+        // 2) 前半段:原线。先移走去后半段的(不计数),再丢弃跨界/被移格上的(计数)
+        int discarded = 0;
+        foreach (var lane in new[] { line.LaneA, line.LaneB })
+        {
+            while (lane.TryRemoveItemInRange(cut, n * L)) { }
+            while (lane.TryRemoveItemInRange(k * L - (W - 1), n * L)) discarded++;
+            lane.ShrinkBack((n - k) * L);
+        }
+        line.Tiles.RemoveRange(k, n - k);
+
+        // 3) 被移格
+        _tiles.Clear(x, y);
+        return discarded;
+    }
+
+    // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
+    // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
+    private static BeltLane SplitBackLane(BeltLane src, int cut, int backLen)
+    {
+        var back = new List<int>();
+        foreach (int p in src.ToAbsolutePositions())
+            if (p >= cut) back.Add(p - cut);
+        return BeltLane.FromAbsolutePositions(backLen, back);
+    }
+
     // 把 up(上游,拼在物理后侧)与 down(下游,拼在出口侧)两条带物品的
     // lane 拼成一条长 combinedLen 的新 lane。前沿绝对距离:down 的原样,
     // up 的每项整体后移 (256 + downLen)——越过新格 T 和整条 down。

@@ -476,4 +476,71 @@ public class BeltLaneTests
         lane.WriteState(w);
         return w.Hash;
     }
+
+    [Fact]
+    public void ShrinkBack_TightensBackCapacity_WithoutMovingItems()
+    {
+        var lane = new BeltLane(512);
+        lane.TryInsertAtBack();   // gaps=[448]
+        lane.Advance(300);         // gaps=[148],物品前沿 148、尾沿 212,队尾空 300
+        lane.ShrinkBack(256);      // 512 -> 256:物品仍在 [148,212],放得下
+        Assert.Equal(new[] { 148 }, lane.Gaps);
+        Assert.False(lane.TryInsertAtBack()); // 现在队尾只剩 256-(148+64)=44,插不下
+    }
+
+    [Fact]
+    public void ShrinkBack_WouldStrandEntryItem_Throws()
+    {
+        var lane = new BeltLane(512);
+        lane.TryInsertAtBack();   // gaps=[448],物品尾沿贴在 512 入口,队尾空 0
+        Assert.Throws<InvalidOperationException>(() => lane.ShrinkBack(256));
+    }
+
+    [Fact]
+    public void ShrinkBack_BelowOneItemWidth_Throws()
+    {
+        var lane = new BeltLane(256);
+        Assert.Throws<InvalidOperationException>(() => lane.ShrinkBack(200)); // 256-200=56 < 64
+    }
+
+    [Fact]
+    public void ShrinkBack_Negative_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BeltLane(256).ShrinkBack(-1));
+    }
+
+    [Fact]
+    public void ShrinkFront_MovesExitInward_TowardItems()
+    {
+        var lane = new BeltLane(512);
+        lane.TryInsertAtBack();   // gaps=[448]
+        lane.ShrinkFront(256);     // 出口内移 256:gaps[0] 448-256=192,长度 256
+        Assert.Equal(new[] { 192 }, lane.Gaps);
+        Assert.Equal(new[] { 192 }, lane.ToAbsolutePositions());
+    }
+
+    [Fact]
+    public void ShrinkFront_WouldStrandFrontItem_Throws()
+    {
+        var lane = new BeltLane(512);
+        lane.TryInsertAtBack();
+        lane.Advance(400);         // gaps=[48]
+        Assert.Throws<InvalidOperationException>(() => lane.ShrinkFront(256)); // gaps[0]=48 < 256
+    }
+
+    [Fact]
+    public void ShrinkFront_EmptyLane_JustShortens()
+    {
+        var lane = new BeltLane(512);
+        lane.ShrinkFront(256);
+        Assert.Equal(0, lane.Count);
+        Assert.True(lane.TryInsertAtBack());
+        Assert.Equal(new[] { 192 }, lane.Gaps); // 256 - 64
+    }
+
+    [Fact]
+    public void ShrinkFront_Negative_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BeltLane(256).ShrinkFront(-1));
+    }
 }

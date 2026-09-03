@@ -131,6 +131,34 @@ public sealed class BeltLane
         _openIndex = 0;
     }
 
+    // ExtendBack 的逆:把入口端向内截短 subtiles 个亚格(移除队尾方向的
+    // 相邻格子)。不碰任何 gap,已有物品到出口的距离不变。
+    // 前置:被截区间 [新长, 旧长) 内没有物品——否则会把入口端物品截飞。
+    public void ShrinkBack(int subtiles)
+    {
+        if (subtiles < 0) throw new ArgumentOutOfRangeException(nameof(subtiles));
+        if (_lineLengthSubTiles - subtiles < ItemWidthSubTiles)
+            throw new InvalidOperationException("ShrinkBack below one item width");
+        if (BackFreeSubTiles() < subtiles)
+            throw new InvalidOperationException("ShrinkBack would strand an item at the entry end");
+        _lineLengthSubTiles -= subtiles;
+    }
+
+    // ExtendFront 的逆:把出口端向内截短 subtiles 个亚格(移除出口方向的
+    // 相邻格子)。出口整体内移,最前物品到新出口的距离相应减小:gaps[0] -= subtiles。
+    // 前置:出口 subtiles 亚格内没有物品(gaps[0] >= subtiles),否则会把队首物品截飞。
+    // _openIndex 不变:gaps[0] 只会更小或归 0,不会重新变非零,不破坏游标不变式。
+    public void ShrinkFront(int subtiles)
+    {
+        if (subtiles < 0) throw new ArgumentOutOfRangeException(nameof(subtiles));
+        if (_lineLengthSubTiles - subtiles < ItemWidthSubTiles)
+            throw new InvalidOperationException("ShrinkFront below one item width");
+        if (_gaps.Count > 0 && _gaps[0] < subtiles)
+            throw new InvalidOperationException("ShrinkFront would strand the front item");
+        _lineLengthSubTiles -= subtiles;
+        if (_gaps.Count > 0) _gaps[0] -= subtiles;
+    }
+
     // 把相对 gap 列表转成"每个物品前沿距出口的绝对亚格距离"(前到后)。
     // 冷路径(合并/拆分/存档),一次线性扫描,允许分配。
     public IReadOnlyList<int> ToAbsolutePositions()
