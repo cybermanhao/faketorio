@@ -49,4 +49,66 @@ public class BeltIntegrationTests
         sim.Step(); // 无下游线,原地不动
         Assert.Equal(new[] { 0 }, LineAt(sim, 0, 0).LaneA.Gaps);
     }
+
+    private static int LiveLineCount(Simulation sim)
+    {
+        int c = 0;
+        for (int i = 0; i < sim.Belts.Capacity; i++) if (sim.Belts.IsAliveAtIndex(i)) c++;
+        return c;
+    }
+
+    [Fact]
+    public void LShapeCorner_ItemFlowsFromEastLineToSouthLine()
+    {
+        var sim = NewSim();
+        // 东向线 A:(0,0)(1,0)(2,0),出口 (2,0),长 768
+        PlaceBelt(sim, 0, 0, E); PlaceBelt(sim, 1, 0, E); PlaceBelt(sim, 2, 0, E);
+        // 南向线 B:(3,0)(3,1)(3,2),入口 Tiles[^1]=(3,0),出口 (3,2),长 768
+        PlaceBelt(sim, 3, 0, S); PlaceBelt(sim, 3, 1, S); PlaceBelt(sim, 3, 2, S);
+        Assert.Equal(2, LiveLineCount(sim)); // 方向不同,两条独立线
+
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(); // 放在 A 入口
+
+        // A 上走 704 (=3*256-64) 亚格,过拐角,再在 B 上走 704;每 tick 8;留足余量
+        for (int t = 0; t < 704 / 8 + 704 / 8 + 20; t++) sim.Step();
+
+        Assert.Equal(0, LineAt(sim, 0, 0).LaneA.Count);  // A 已空
+        Assert.Equal(1, LineAt(sim, 3, 2).LaneA.Count);  // 物品到了 B
+    }
+
+    [Fact]
+    public void FourTileLoop_ItemKeepsCirculating()
+    {
+        var sim = NewSim();
+        PlaceBelt(sim, 0, 0, E);
+        PlaceBelt(sim, 1, 0, S);
+        PlaceBelt(sim, 1, 1, W);
+        PlaceBelt(sim, 0, 1, N);
+        Assert.Equal(4, LiveLineCount(sim)); // 四格四向,互不合并
+
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack();
+        for (int t = 0; t < 300; t++) sim.Step(); // 一圈 ≈ 4*24 tick,跑多圈
+
+        int total = LineAt(sim, 0, 0).LaneA.Count + LineAt(sim, 1, 0).LaneA.Count
+                  + LineAt(sim, 1, 1).LaneA.Count + LineAt(sim, 0, 1).LaneA.Count;
+        Assert.Equal(1, total); // 物品一直在环里,不多不少
+    }
+
+    [Fact]
+    public void FourTileLoop_PackedFull_Freezes()
+    {
+        var sim = NewSim();
+        PlaceBelt(sim, 0, 0, E);
+        PlaceBelt(sim, 1, 0, S);
+        PlaceBelt(sim, 1, 1, W);
+        PlaceBelt(sim, 0, 1, N);
+
+        foreach (var (x, y) in new[] { (0, 0), (1, 0), (1, 1), (0, 1) })
+            while (LineAt(sim, x, y).LaneA.TryInsertAtBack()) { } // 每条线塞满 (256/64=4)
+
+        for (int t = 0; t < 40; t++) sim.Step(); // 压到出口
+        var frozen = sim.ComputeStateHash();
+        for (int t = 0; t < 40; t++) sim.Step();
+        Assert.Equal(frozen, sim.ComputeStateHash()); // 塞满 ⇒ 不再变化
+    }
 }

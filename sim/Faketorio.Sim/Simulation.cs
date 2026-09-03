@@ -36,6 +36,21 @@ public sealed class Simulation
             line.LaneA.Advance(speed);
             line.LaneB.Advance(speed);
         }
+        // 传送带:线间交接(拐角处把出口物品传给下游线;不检查方向)
+        for (int bi = 0; bi < Belts.Capacity; bi++)
+        {
+            if (!Belts.IsAliveAtIndex(bi)) continue;
+            var line = Belts.GetAtIndex(bi);
+            var (dx, dy) = BeltNetwork.Delta(line.Direction);
+            var (ex, ey) = line.Tiles[0];
+            int fx = ex + dx, fy = ey + dy;
+            var downId = Belts.GetLineAt(fx, fy);
+            if (!downId.IsValid) continue;
+            var down = Belts.GetLine(downId);
+            if (down.Tiles[^1] != (fx, fy)) continue;
+            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack()) line.LaneA.RemoveFront();
+            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack()) line.LaneB.RemoveFront();
+        }
         Tick++;
     }
 
@@ -79,6 +94,8 @@ public sealed class Simulation
                 writer.Write(tiles[i].Generation);
             }
         }
+
+        Belts.WriteState(writer);
     }
 
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
