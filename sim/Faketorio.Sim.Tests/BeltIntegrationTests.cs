@@ -1,6 +1,7 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Prototypes;
+using Faketorio.Sim.State;
 
 namespace Faketorio.Sim.Tests;
 
@@ -48,6 +49,13 @@ public class BeltIntegrationTests
         Assert.Equal(new[] { 0 }, LineAt(sim, 0, 0).LaneA.Gaps);
         sim.Step(); // 无下游线,原地不动
         Assert.Equal(new[] { 0 }, LineAt(sim, 0, 0).LaneA.Gaps);
+    }
+
+    private static ulong BeltHash(Simulation sim)
+    {
+        var w = new Fnv1aHashWriter();
+        sim.Belts.WriteState(w);
+        return w.Hash;
     }
 
     private static int LiveLineCount(Simulation sim)
@@ -107,8 +115,8 @@ public class BeltIntegrationTests
             while (LineAt(sim, x, y).LaneA.TryInsertAtBack()) { } // 每条线塞满 (256/64=4)
 
         for (int t = 0; t < 40; t++) sim.Step(); // 压到出口
-        var frozen = sim.ComputeStateHash();
+        var frozen = BeltHash(sim);
         for (int t = 0; t < 40; t++) sim.Step();
-        Assert.Equal(frozen, sim.ComputeStateHash()); // 塞满 ⇒ 不再变化
+        Assert.Equal(frozen, BeltHash(sim)); // 塞满 ⇒ 传送带状态不再变
     }
 }
