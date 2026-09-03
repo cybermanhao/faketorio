@@ -27,7 +27,15 @@ public sealed class Simulation
         var commands = _commands.BeginTick();
         for (int i = 0; i < commands.Length; i++)
             Apply(in commands[i]);
-        // 后续计划在此追加系统更新(传送带、机器、电网……)
+        // 传送带:推进(按 Belts 池索引序,确定)
+        for (int bi = 0; bi < Belts.Capacity; bi++)
+        {
+            if (!Belts.IsAliveAtIndex(bi)) continue;
+            var line = Belts.GetAtIndex(bi);
+            int speed = ResolveBeltSpeed(line);
+            line.LaneA.Advance(speed);
+            line.LaneB.Advance(speed);
+        }
         Tick++;
     }
 
@@ -71,6 +79,16 @@ public sealed class Simulation
                 writer.Write(tiles[i].Generation);
             }
         }
+    }
+
+    // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
+    // 严格:出口格上一定是传送带实体,不做 fallback。
+    private int ResolveBeltSpeed(BeltLine line)
+    {
+        var (ex, ey) = line.Tiles[0];
+        var eid = World.GetEntityAt(ex, ey);
+        ref var d = ref Entities.Get(eid);
+        return ((TransportBeltPrototype)Prototypes.GetById(d.ProtoId)).SpeedSubTilesPerTick;
     }
 
     private void Apply(in Command command)
