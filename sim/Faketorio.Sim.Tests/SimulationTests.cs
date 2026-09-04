@@ -506,4 +506,47 @@ public class SimulationTests
         Assert.Single(sim.Player.CraftQueue);
         Assert.Equal(recipe.EnergyRequiredTicks, sim.Player.CraftQueue[0].Progress);
     }
+
+    [Fact]
+    public void NewSimulation_FillsPlayerInventoryFromStartingKit()
+    {
+        var sim = NewSim();
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int chest = sim.Prototypes.Get<ItemPrototype>("wooden-chest").Id;
+        Assert.Equal(8, sim.Player.Inventory.CountOf(plate));
+        Assert.Equal(1, sim.Player.Inventory.CountOf(chest));
+    }
+
+    [Fact]
+    public void FullLoop_PlaceChest_HandMineItBack_ThenCraftAnother()
+    {
+        var sim = NewSim();
+        int chestItem = sim.Prototypes.Get<ItemPrototype>("wooden-chest").Id;
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int chestRecipe = sim.Prototypes.Get<RecipePrototype>("wooden-chest").Id;
+        int miningTicks = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").MiningTimeTicks;
+        var chestEnergy = sim.Prototypes.Get<RecipePrototype>("wooden-chest").EnergyRequiredTicks;
+        int chestBefore = sim.Player.Inventory.CountOf(chestItem);   // starter kit chest
+        int plateBefore = sim.Player.Inventory.CountOf(plate);       // starter kit plate
+
+        // place a chest at (1,0) -- PlaceEntity does not consume the player's inventory -- then mine it back
+        sim.Submit(new Command
+        {
+            Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id,
+            X = 1, Y = 0, Rotation = 0,
+        });
+        sim.Step();
+        Assert.Equal(chestBefore, sim.Player.Inventory.CountOf(chestItem));   // unchanged by placement
+
+        for (int t = 0; t < miningTicks + 2; t++) { sim.Submit(MineAt(1, 0)); sim.Step(); }
+        Assert.Equal(chestBefore + 1, sim.Player.Inventory.CountOf(chestItem));   // mined back
+
+        // craft a second chest from starter plate
+        sim.Submit(Craft(chestRecipe, 1));
+        sim.Step();
+        for (int t = 0; t < chestEnergy + 2; t++) sim.Step();
+        Assert.Equal(chestBefore + 2, sim.Player.Inventory.CountOf(chestItem));
+        Assert.Equal(plateBefore - 2, sim.Player.Inventory.CountOf(plate));
+    }
 }

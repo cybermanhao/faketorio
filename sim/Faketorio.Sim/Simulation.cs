@@ -39,7 +39,11 @@ public sealed class Simulation
             throw new InvalidOperationException("No 'player' prototype in the registry");
         _playerProto = pp;
         Player = new Player(pp.InventorySize);
-        // 开局物资包在 Task 5 填;这里先留空。
+        foreach (var ia in pp.StartingInventory)
+        {
+            var item = prototypes.Get<ItemPrototype>(ia.Name);
+            Player.Inventory.Insert(item.Id, ia.Amount, item.StackSize);   // 放不下静默丢弃(InventorySize >= 1 已校验)
+        }
     }
 
     public void Submit(in Command command) => _commands.Enqueue(command);
