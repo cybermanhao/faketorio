@@ -151,4 +151,31 @@ public class DeterminismTests
 
         Assert.NotEqual(before, sim.ComputeStateHash());
     }
+
+    private static List<ulong> RunResourceScenario(long seed)
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
+        var hashes = new List<ulong>();
+        for (int t = 0; t < 30; t++)
+        {
+            if (t == 0)
+                for (int x = 180; x < 260; x += 8)          // pure-noise sweep across chunks
+                    for (int y = 180; y < 260; y += 8)
+                        sim.Resources.GetResourceAt(x, y);
+            if (t == 5)  sim.Resources.Extract(6, -8, 40);   // coal starter patch
+            if (t == 12) sim.Resources.Extract(-9, -6, 40);  // iron starter patch
+            if (t == 20) sim.Resources.Extract(6, -8, 25);
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void ResourceScenario_SameSeedSameCommands_SameHashEveryTick()
+        => Assert.Equal(RunResourceScenario(777), RunResourceScenario(777));
+
+    [Fact]
+    public void ResourceScenario_DifferentSeed_DifferentHash()
+        => Assert.NotEqual(RunResourceScenario(1), RunResourceScenario(2));
 }
