@@ -451,6 +451,22 @@ public class SimulationTests
     }
 
     [Fact]
+    public void HandCraft_HugeCount_IsRejected_NoDeduction()
+    {
+        var sim = NewSim();
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+        int before = sim.Player.Inventory.CountOf(plate);
+
+        sim.Submit(Craft(gearRecipeId, 1_073_741_824));   // would overflow int * int
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(before, sim.Player.Inventory.CountOf(plate));
+        Assert.Empty(sim.Player.CraftQueue);
+    }
+
+    [Fact]
     public void HandCraft_SmeltingRecipe_IsRejected()
     {
         var sim = NewSim();

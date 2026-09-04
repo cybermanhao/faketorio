@@ -285,7 +285,7 @@ public sealed class Simulation
                 return;
             case CommandType.CraftEnqueue:
             {
-                if (command.X < 1
+                if (command.X < 1 || command.X > 1_000_000
                     || !Prototypes.TryGetById(command.ProtoId, out var rp) || rp is not RecipePrototype recipe
                     || recipe.Category != "crafting" || !recipe.Enabled
                     || Player.CraftQueue.Count >= _playerProto.CraftQueueCap)
@@ -295,13 +295,13 @@ public sealed class Simulation
                 }
                 // 检查能否付清 X 份的全部输入
                 foreach (var ing in recipe.ResolvedIngredients)
-                    if (Player.Inventory.CountOf(ing.ItemProtoId) < ing.Amount * command.X)
+                    if ((long)Player.Inventory.CountOf(ing.ItemProtoId) < (long)ing.Amount * command.X)
                     {
                         RejectedCommandCount++;
                         return;
                     }
                 foreach (var ing in recipe.ResolvedIngredients)
-                    Player.Inventory.Remove(ing.ItemProtoId, ing.Amount * command.X);
+                    Player.Inventory.Remove(ing.ItemProtoId, (int)((long)ing.Amount * command.X));
                 Player.EnqueueCraft(command.ProtoId, command.X);
                 return;
             }

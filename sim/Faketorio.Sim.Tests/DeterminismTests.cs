@@ -184,12 +184,12 @@ public class DeterminismTests
         var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
         int gearRecipe = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
         var hashes = new List<ulong>();
-        for (int t = 0; t < 60; t++)
+        for (int t = 0; t < 90; t++)
         {
             if (t < 8)  sim.Submit(new Command { Type = CommandType.MovePlayer, Rotation = 2 });  // walk east
             if (t == 8) sim.Submit(new Command { Type = CommandType.StopPlayer });
             if (t == 10) sim.Submit(new Command { Type = CommandType.MineStart, X = 1, Y = -1 });  // near coal patch
-            if (t == 40) sim.Submit(new Command { Type = CommandType.MineStop });
+            if (t == 75) sim.Submit(new Command { Type = CommandType.MineStop });
             if (t == 12) sim.Submit(new Command { Type = CommandType.CraftEnqueue, ProtoId = gearRecipe, X = 1 });
             sim.Step();
             hashes.Add(sim.ComputeStateHash());
@@ -200,4 +200,8 @@ public class DeterminismTests
     [Fact]
     public void PlayerScenario_SameSeedSameCommands_SameHashEveryTick()
         => Assert.Equal(RunPlayerScenario(4242), RunPlayerScenario(4242));
+
+    [Fact]
+    public void PlayerScenario_DifferentSeed_DifferentHash()
+        => Assert.NotEqual(RunPlayerScenario(1), RunPlayerScenario(2));
 }
