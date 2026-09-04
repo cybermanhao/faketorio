@@ -73,6 +73,12 @@ public class DeterminismTests
                 sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 3, Y = 0 });
             if (t == 20) // 补回 (3,0) -> 三路合并回一条
                 sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = belt, X = 3, Y = 0, Rotation = 1 });
+            if (t >= 6 && t % 12 == 6)
+            {
+                var line = sim.Belts.GetLine(sim.Belts.GetLineAt(0, 0));
+                line.LaneA.TryInsertAtBack();
+                line.LaneB.TryInsertAtBack();
+            }
             sim.Step();
             hashes.Add(sim.ComputeStateHash());
         }

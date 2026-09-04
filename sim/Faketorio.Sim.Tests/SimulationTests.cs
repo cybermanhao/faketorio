@@ -105,6 +105,22 @@ public class SimulationTests
     }
 
     [Fact]
+    public void PlaceEntity_WithOutOfRangeRotation_IsRejected()
+    {
+        var sim = NewSim();
+        sim.Submit(new Command
+        {
+            Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 0, Y = 0, Rotation = 4,
+        });
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
+        Assert.Equal(0, LiveLineCount(sim.Belts)); // helper already in this file from Task 1
+    }
+
+    [Fact]
     public void MultiTileEntity_PlacementAndRemoval_CoversFullFootprintAcrossChunks()
     {
         var sim = NewSim();

@@ -83,12 +83,15 @@ public class BeltIntegrationTests
         Assert.Equal(2, LiveLineCount(sim)); // 方向不同,两条独立线
 
         LineAt(sim, 0, 0).LaneA.TryInsertAtBack(); // 放在 A 入口
+        LineAt(sim, 0, 0).LaneB.TryInsertAtBack();
 
         // A 上走 704 (=3*256-64) 亚格,过拐角,再在 B 上走 704;每 tick 8;留足余量
         for (int t = 0; t < 704 / 8 + 704 / 8 + 20; t++) sim.Step();
 
         Assert.Equal(0, LineAt(sim, 0, 0).LaneA.Count);  // A 已空
         Assert.Equal(1, LineAt(sim, 3, 2).LaneA.Count);  // 物品到了 B
+        Assert.Equal(0, LineAt(sim, 0, 0).LaneB.Count);
+        Assert.Equal(1, LineAt(sim, 3, 2).LaneB.Count);
     }
 
     [Fact]

@@ -104,8 +104,8 @@ public sealed class Simulation
     {
         var (ex, ey) = line.Tiles[0];
         var eid = World.GetEntityAt(ex, ey);
-        ref var d = ref Entities.Get(eid);
-        return ((TransportBeltPrototype)Prototypes.GetById(d.ProtoId)).SpeedSubTilesPerTick;
+        var protoId = Entities.Get(eid).ProtoId;
+        return ((TransportBeltPrototype)Prototypes.GetById(protoId)).SpeedSubTilesPerTick;
     }
 
     private void Apply(in Command command)
@@ -115,6 +115,7 @@ public sealed class Simulation
             case CommandType.PlaceEntity:
             {
                 if (!Prototypes.TryGetById(command.ProtoId, out var p) || p is not EntityPrototype proto
+                    || command.Rotation > 3
                     || !World.IsAreaFree(command.X, command.Y, proto.TileWidth, proto.TileHeight))
                 {
                     RejectedCommandCount++;
