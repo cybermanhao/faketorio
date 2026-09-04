@@ -278,4 +278,28 @@ public class SimulationTests
         Assert.Equal(0, sim.Inventories.Capacity);
         Assert.Equal(0, sim.RejectedCommandCount);
     }
+
+    [Fact]
+    public void Resources_StartsWithNoGeneratedChunks()
+    {
+        Assert.Equal(0, NewSim().Resources.GeneratedChunkCount);
+    }
+
+    [Fact]
+    public void GetResourceAt_GeneratesChunk()
+    {
+        var sim = NewSim();
+        sim.Resources.GetResourceAt(6, -8);
+        Assert.True(sim.Resources.IsChunkGenerated(6, -8));
+        Assert.Equal(1, sim.Resources.GeneratedChunkCount);
+    }
+
+    [Fact]
+    public void WriteState_CoversResourceLayer()
+    {
+        var sim = NewSim();
+        var before = sim.ComputeStateHash();
+        sim.Resources.GetResourceAt(6, -8);      // starter patch -> non-empty chunk
+        Assert.NotEqual(before, sim.ComputeStateHash());
+    }
 }

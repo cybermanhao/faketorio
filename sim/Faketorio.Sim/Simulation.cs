@@ -19,12 +19,21 @@ public sealed class Simulation
     // 反过来直接收 EntityId。这是有意的偏差——EntityId 只是个裸 readonly
     // record struct(不依赖 EntityPool),拿它当键不引入对实体池的依赖。
     public Inventories Inventories { get; } = new();
+    public ResourceGrid Resources { get; }
+
+    private readonly long _worldSeed;
+
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
 
     private readonly CommandQueue _commands = new();
 
-    public Simulation(PrototypeRegistry prototypes) => Prototypes = prototypes;
+    public Simulation(PrototypeRegistry prototypes, long worldSeed = 0)
+    {
+        Prototypes = prototypes;
+        _worldSeed = worldSeed;
+        Resources = new ResourceGrid(worldSeed, prototypes);
+    }
 
     public void Submit(in Command command) => _commands.Enqueue(command);
 
@@ -71,6 +80,7 @@ public sealed class Simulation
     {
         writer.Write(Tick);
         writer.Write(RejectedCommandCount);
+        writer.Write(_worldSeed);
 
         // 实体池分配器簿记(高水位/空闲栈/全部代数):恢复后 Create() 分配顺序需一致
         Entities.WriteState(writer);
@@ -103,6 +113,7 @@ public sealed class Simulation
 
         Belts.WriteState(writer);
         Inventories.WriteState(writer);
+        Resources.WriteState(writer);
     }
 
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
