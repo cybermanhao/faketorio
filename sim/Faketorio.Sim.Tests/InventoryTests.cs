@@ -85,12 +85,13 @@ public class InventoryTests
     }
 
     [Fact]
-    public void Insert_NonPositiveCount_ReturnsZero_NoStateChange()
+    public void Insert_NonPositiveCountOrStackSize_ReturnsZero_NoStateChange()
     {
         var inv = new Inventory(4);
         var h = Hash(inv);
         Assert.Equal(0, inv.Insert(Iron, -1, Stack));
         Assert.Equal(0, inv.Insert(Iron, 0, Stack));
+        Assert.Equal(0, inv.Insert(Iron, 10, 0));      // stackSize 0: nothing fits, no mutation
         Assert.Equal(h, Hash(inv));
     }
 

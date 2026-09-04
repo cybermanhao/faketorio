@@ -36,7 +36,7 @@ public readonly record struct ItemStack(int ItemProtoId, int Count)
 
 - 空槽 ⟺ `Count == 0`。**不变式**:任何代码路径都不产生 `Count == 0 && ItemProtoId != 0`——`Insert` 永不写零数量槽,`Remove` 扣到 0 时写整个 `ItemStack.Empty`。所以 `slot == ItemStack.Empty`(记录结构体值相等)与 `slot.IsEmpty` 永远等价;`IsEmpty` 只看 `Count` 是为了快。
 - 堆叠上限**不进 struct**——它是 `ItemPrototype.StackSize`(已存在,默认 50),由调用方从 `PrototypeRegistry` 解析后传给 `Inventory.Insert`。`Inventory` 本身 prototype 无关,和 `BeltLane` 一样。
-- **调用方保证的前置条件**(不做运行时检查,信任前置条件的风格):`Count` 恒 `> 0` 当且仅当槽非空(`Count < 0` 不合法);`Inventory.Insert` 的 `stackSize` 恒 `> 0`(否则一件放不进、返回 0——会让"循环放到放完"的调用方死转)。
+- **调用方保证的前置条件**(不做运行时检查,信任前置条件的风格):`Count` 恒 `> 0` 当且仅当槽非空(`Count < 0` 不合法);`Inventory.Insert` 的 `stackSize` 恒 `> 0`(否则一件放不进、返回 0——会让"循环放到放完"的调用方死转)。另外 `Insert` 也**防御** `stackSize <= 0`:直接返回 0、不改状态(与 `count <= 0` 守卫对称),否则 pass 2 会写出零/负数量槽、破坏上述不变式——有了这道防御,`ItemStack` 不变式无条件成立。
 
 ## 4. `Inventory`
 
@@ -74,7 +74,7 @@ public sealed class Inventory
 
 1. `ReadOnly` → 返回 0,不改状态。
 2. `_filterItemProtoId != 0 && itemProtoId != _filterItemProtoId` → 返回 0。
-3. `count <= 0` → 返回 0(防御,不抛)。
+3. `count <= 0 || stackSize <= 0` → 返回 0(防御,不抛;`stackSize <= 0` 会让 pass 2 写出零/负数量槽,破坏不变式)。
 4. **第一轮**:从前往后遍历槽,凡 `_slots[i].ItemProtoId == itemProtoId && _slots[i].Count < stackSize` 的,补到 `stackSize`(或补完 `count` 剩余量),累加放入数。
 5. **第二轮**:遍历空槽,每槽放入 `min(剩余, stackSize)`,累加。
 6. 返回累计放入数。

@@ -3,8 +3,8 @@ using Faketorio.Sim.State;
 namespace Faketorio.Sim.Items;
 
 // 定长槽位库存。prototype 无关(和 BeltLane 一样):堆叠上限每次调用由外面传。
-// 越界索引抛原生 IndexOutOfRangeException(信任调用方);Insert/Remove 只
-// 防御 count <= 0(返回 0,不抛)。
+// 越界索引抛原生 IndexOutOfRangeException(信任调用方);Insert/Remove 防御
+// count <= 0(返回 0,不抛),Insert 另防御 stackSize <= 0(同样返回 0)。
 public sealed class Inventory
 {
     private readonly ItemStack[] _slots;   // 定长,长度 = 构造时槽数
@@ -29,7 +29,7 @@ public sealed class Inventory
     {
         if (ReadOnly) return 0;
         if (FilterItemProtoId != 0 && itemProtoId != FilterItemProtoId) return 0;
-        if (count <= 0) return 0;
+        if (count <= 0 || stackSize <= 0) return 0;
 
         int remaining = count;
 
