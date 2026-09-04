@@ -59,4 +59,35 @@ public class DeterminismTests
         }
         Assert.NotEqual(Run(0), Run(1));
     }
+
+    private static List<ulong> RunBeltScenario()
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"));
+        int belt = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id;
+        var hashes = new List<ulong>();
+        for (int t = 0; t < 60; t++)
+        {
+            if (t < 6) // 放一串 6 格东向带 (0,0)..(5,0)
+                sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = belt, X = t, Y = 0, Rotation = 1 });
+            if (t == 10) // 中间拆一格 -> 拆成两条线
+                sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 3, Y = 0 });
+            if (t == 20) // 补回 (3,0) -> 三路合并回一条
+                sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = belt, X = 3, Y = 0, Rotation = 1 });
+            if (t >= 6 && t % 12 == 6)
+            {
+                var line = sim.Belts.GetLine(sim.Belts.GetLineAt(0, 0));
+                line.LaneA.TryInsertAtBack();
+                line.LaneB.TryInsertAtBack();
+            }
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void BeltScenario_SameCommands_SameHashEveryTick()
+    {
+        Assert.Equal(RunBeltScenario(), RunBeltScenario());
+    }
 }

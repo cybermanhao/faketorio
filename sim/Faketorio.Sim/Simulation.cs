@@ -1,3 +1,4 @@
+using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Prototypes;
@@ -11,6 +12,7 @@ public sealed class Simulation
     public PrototypeRegistry Prototypes { get; }
     public WorldGrid World { get; } = new();
     public EntityPool<EntityData> Entities { get; } = new();
+    public BeltNetwork Belts { get; } = new();
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
 
@@ -25,7 +27,30 @@ public sealed class Simulation
         var commands = _commands.BeginTick();
         for (int i = 0; i < commands.Length; i++)
             Apply(in commands[i]);
-        // 后续计划在此追加系统更新(传送带、机器、电网……)
+        // 传送带:推进(按 Belts 池索引序,确定)
+        for (int bi = 0; bi < Belts.Capacity; bi++)
+        {
+            if (!Belts.IsAliveAtIndex(bi)) continue;
+            var line = Belts.GetAtIndex(bi);
+            int speed = ResolveBeltSpeed(line);
+            line.LaneA.Advance(speed);
+            line.LaneB.Advance(speed);
+        }
+        // 传送带:线间交接(拐角处把出口物品传给下游线;不检查方向)
+        for (int bi = 0; bi < Belts.Capacity; bi++)
+        {
+            if (!Belts.IsAliveAtIndex(bi)) continue;
+            var line = Belts.GetAtIndex(bi);
+            var (dx, dy) = BeltNetwork.Delta(line.Direction);
+            var (ex, ey) = line.Tiles[0];
+            int fx = ex + dx, fy = ey + dy;
+            var downId = Belts.GetLineAt(fx, fy);
+            if (!downId.IsValid) continue;
+            var down = Belts.GetLine(downId);
+            if (down.Tiles[^1] != (fx, fy)) continue;
+            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack()) line.LaneA.RemoveFront();
+            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack()) line.LaneB.RemoveFront();
+        }
         Tick++;
     }
 
@@ -69,6 +94,18 @@ public sealed class Simulation
                 writer.Write(tiles[i].Generation);
             }
         }
+
+        Belts.WriteState(writer);
+    }
+
+    // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
+    // 严格:出口格上一定是传送带实体,不做 fallback。
+    private int ResolveBeltSpeed(BeltLine line)
+    {
+        var (ex, ey) = line.Tiles[0];
+        var eid = World.GetEntityAt(ex, ey);
+        var protoId = Entities.Get(eid).ProtoId;
+        return ((TransportBeltPrototype)Prototypes.GetById(protoId)).SpeedSubTilesPerTick;
     }
 
     private void Apply(in Command command)
@@ -78,6 +115,7 @@ public sealed class Simulation
             case CommandType.PlaceEntity:
             {
                 if (!Prototypes.TryGetById(command.ProtoId, out var p) || p is not EntityPrototype proto
+                    || command.Rotation > 3
                     || !World.IsAreaFree(command.X, command.Y, proto.TileWidth, proto.TileHeight))
                 {
                     RejectedCommandCount++;
@@ -91,6 +129,8 @@ public sealed class Simulation
                     Rotation = command.Rotation,
                 });
                 World.OccupyArea(command.X, command.Y, proto.TileWidth, proto.TileHeight, id);
+                if (proto is TransportBeltPrototype)
+                    Belts.AddBelt(command.X, command.Y, command.Rotation);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -107,8 +147,12 @@ public sealed class Simulation
                     RejectedCommandCount++;
                     return;
                 }
+                int bx = data.X, by = data.Y;
+                bool isBelt = proto is TransportBeltPrototype;
                 World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
                 Entities.Destroy(id);
+                if (isBelt)
+                    Belts.RemoveBelt(bx, by);
                 return;
             }
             default:
