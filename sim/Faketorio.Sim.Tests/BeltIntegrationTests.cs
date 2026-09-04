@@ -65,6 +65,13 @@ public class BeltIntegrationTests
         return c;
     }
 
+    // 把一条 256 长的 lane 塞满 4 个物品:交替 insert / advance-to-compress。
+    private static void Pack(BeltLane lane)
+    {
+        while (lane.TryInsertAtBack())
+            lane.Advance(256); // 把刚插入的物品推到出口,为下一个腾出入口空间
+    }
+
     [Fact]
     public void LShapeCorner_ItemFlowsFromEastLineToSouthLine()
     {
@@ -112,7 +119,7 @@ public class BeltIntegrationTests
         PlaceBelt(sim, 0, 1, N);
 
         foreach (var (x, y) in new[] { (0, 0), (1, 0), (1, 1), (0, 1) })
-            while (LineAt(sim, x, y).LaneA.TryInsertAtBack()) { } // 每条线塞满 (256/64=4)
+            Pack(LineAt(sim, x, y).LaneA);
 
         for (int t = 0; t < 40; t++) sim.Step(); // 压到出口
         var frozen = BeltHash(sim);
