@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `2ad2b1f`..`a5f569d`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Add a player to the simulation — sub-tile position, walk-intent movement with collision, hand-mining (entities and resources), a bounded hand-craft queue, and a data-driven starting inventory — closing the first playable loop over P4 inventory + P6 resources + recipes + commands.
 
 **Architecture:** `Player` is a standalone `Simulation` object (not in `EntityPool` — it doesn't occupy tiles). It holds a sub-tile `(X, Y)` position, a walk-intent state, an int64 mining-progress accumulator, a FIFO `List<CraftJob>` craft queue, and its own `Inventory` (P4). New commands (`MovePlayer`/`StopPlayer`/`MineStart`/`MineStop`/`CraftEnqueue`) set intent; a new "player tick" segment in `Simulation.Step` — between the command-apply loop and the belt advance — resolves walking (with whole-step collision against `WorldGrid`), mining progress + completion (entity removal via a shared `DestroyEntityAt` helper, or `ResourceGrid.Extract`), and craft-queue head progress + completion (blocks when the inventory is full). All math is integer/int64; `Player.WriteState` is appended to `Simulation.WriteState` after `Resources.WriteState`.
