@@ -53,6 +53,7 @@ public sealed class Simulation
         // 玩家 tick:① 行走(碰撞) ② 挖掘(Task 3) ③ 合成(Task 4)
         PlayerWalk();
         PlayerMine();
+        PlayerCraft();
 
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
@@ -185,6 +186,32 @@ public sealed class Simulation
         }
     }
 
+    private void PlayerCraft()
+    {
+        if (Player.CraftQueue.Count == 0) return;
+        var job = Player.CraftQueue[0];
+        var recipe = (RecipePrototype)Prototypes.GetById(job.RecipeProtoId);
+
+        // 阻塞在阈值:一旦到达 EnergyRequiredTicks 就不再累加进度(否则被卡住的
+        // job 每 tick 都往上加,Progress 会无界超过阈值——手挖同款"停在阈值"约定)。
+        if (job.Progress < recipe.EnergyRequiredTicks) Player.TickCraftHeadProgress();
+        if (Player.CraftQueue[0].Progress < recipe.EnergyRequiredTicks) return;
+
+        // 全有或全无预检(M1 配方单产物)
+        foreach (var res in recipe.ResolvedResults)
+        {
+            var ip = Prototypes.GetById(res.ItemProtoId);
+            int stack = ((ItemPrototype)ip).StackSize;
+            if (!Player.Inventory.CanInsert(res.ItemProtoId, res.Amount, stack)) return;   // 阻塞
+        }
+        foreach (var res in recipe.ResolvedResults)
+        {
+            int stack = ((ItemPrototype)Prototypes.GetById(res.ItemProtoId)).StackSize;
+            Player.Inventory.Insert(res.ItemProtoId, res.Amount, stack);
+        }
+        Player.CompleteOneCraftUnit();
+    }
+
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
     // 严格:出口格上一定是传送带实体,不做 fallback。
     private int ResolveBeltSpeed(BeltLine line)
@@ -252,6 +279,28 @@ public sealed class Simulation
             case CommandType.MineStop:
                 Player.StopMining();
                 return;
+            case CommandType.CraftEnqueue:
+            {
+                if (command.X < 1
+                    || !Prototypes.TryGetById(command.ProtoId, out var rp) || rp is not RecipePrototype recipe
+                    || recipe.Category != "crafting" || !recipe.Enabled
+                    || Player.CraftQueue.Count >= _playerProto.CraftQueueCap)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+                // 检查能否付清 X 份的全部输入
+                foreach (var ing in recipe.ResolvedIngredients)
+                    if (Player.Inventory.CountOf(ing.ItemProtoId) < ing.Amount * command.X)
+                    {
+                        RejectedCommandCount++;
+                        return;
+                    }
+                foreach (var ing in recipe.ResolvedIngredients)
+                    Player.Inventory.Remove(ing.ItemProtoId, ing.Amount * command.X);
+                Player.EnqueueCraft(command.ProtoId, command.X);
+                return;
+            }
             default:
                 RejectedCommandCount++;
                 return;

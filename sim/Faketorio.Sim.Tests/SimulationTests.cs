@@ -410,4 +410,100 @@ public class SimulationTests
         Assert.Equal(amtBefore, sim.Resources.GetResourceAt(1, -1).Amount);   // nothing extracted
         Assert.Equal(miningTicks, sim.Player.MineProgress);                    // parked at threshold
     }
+
+    private static Command Craft(int recipeId, int count) => new()
+        { Type = CommandType.CraftEnqueue, ProtoId = recipeId, X = count };
+
+    [Fact]
+    public void HandCraft_DeductsIngredientsAtEnqueue_ProducesResultsOverTime()
+    {
+        var sim = NewSim();
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int gear = sim.Prototypes.Get<ItemPrototype>("iron-gear-wheel").Id;
+        var recipe = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel");
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        sim.Player.Inventory.Insert(plate, 4, plateStack);   // exactly enough for 2 gears (2 each)
+        int plateBefore = sim.Player.Inventory.CountOf(plate);
+        int gearBefore = sim.Player.Inventory.CountOf(gear);
+
+        sim.Submit(Craft(recipe.Id, 2));
+        sim.Step();
+        Assert.Equal(plateBefore - 4, sim.Player.Inventory.CountOf(plate));
+        Assert.Single(sim.Player.CraftQueue);
+
+        for (int t = 0; t < 2 * recipe.EnergyRequiredTicks + 2; t++) sim.Step();
+        Assert.Equal(gearBefore + 2, sim.Player.Inventory.CountOf(gear));
+        Assert.Empty(sim.Player.CraftQueue);
+    }
+
+    [Fact]
+    public void HandCraft_NotEnoughIngredients_IsRejected_NoDeduction()
+    {
+        var sim = NewSim();
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+        int before = sim.Player.Inventory.CountOf(plate);
+        sim.Submit(Craft(gearRecipeId, 999));      // needs 1998 plate — far beyond any starting amount
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(before, sim.Player.Inventory.CountOf(plate));
+        Assert.Empty(sim.Player.CraftQueue);
+    }
+
+    [Fact]
+    public void HandCraft_SmeltingRecipe_IsRejected()
+    {
+        var sim = NewSim();
+        int ironPlateRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-plate").Id;  // category "smelting"
+        sim.Submit(Craft(ironPlateRecipeId, 1));
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void HandCraft_QueueFull_IsRejected()
+    {
+        var sim = NewSim();
+        int cap = sim.Prototypes.Get<PlayerPrototype>("player").CraftQueueCap;
+        int chestRecipeId = sim.Prototypes.Get<RecipePrototype>("wooden-chest").Id;
+        // give the player plenty of plate
+        sim.Player.Inventory.Insert(sim.Prototypes.Get<ItemPrototype>("iron-plate").Id, 500, 100);
+        // batch all cap enqueues into a single tick: wooden-chest's EnergyRequiredTicks (30) is
+        // less than CraftQueueCap (32), so stepping once per submit would let the head job
+        // complete mid-loop and drain the queue below cap before the loop finishes.
+        for (int i = 0; i < cap; i++) sim.Submit(Craft(chestRecipeId, 1));
+        sim.Step();
+        Assert.Equal(cap, sim.Player.CraftQueue.Count);
+        sim.Submit(Craft(chestRecipeId, 1)); sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(cap, sim.Player.CraftQueue.Count);
+    }
+
+    [Fact]
+    public void HandCraft_InventoryFull_BlocksHeadJob()
+    {
+        var sim = NewSim();
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int gear = sim.Prototypes.Get<ItemPrototype>("iron-gear-wheel").Id;
+        var recipe = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel");
+        // more than enough plate for one gear (2 needed), then jam every slot with a
+        // non-gear item so the result can't land. Using exactly 2 plate would empty that
+        // slot the instant CraftEnqueue deducts the ingredient, freeing a spot for the gear
+        // and defeating the "inventory full" setup — so stock extra plate that survives deduction.
+        var inv = sim.Player.Inventory;
+        inv.Insert(plate, 4, 100);   // craft consumes 2, leaving 2 behind (slot stays non-empty, still iron-plate)
+        // fill remaining slots: keep 0 free for gear. Use coal to fill all-but-none.
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        inv.Insert(coal, inv.SlotCount * 50, 50);   // fills every slot not holding the plate stack
+        // (SlotCount-1) slots * 50 coal fills them; plate slot stays iron-plate(2 after deduction).
+        // No empty slot, no partial gear-compatible slot.
+
+        sim.Submit(Craft(recipe.Id, 1));
+        sim.Step();
+        for (int t = 0; t < recipe.EnergyRequiredTicks + 5; t++) sim.Step();
+
+        Assert.Equal(0, sim.Player.Inventory.CountOf(gear));   // blocked
+        Assert.Single(sim.Player.CraftQueue);
+        Assert.Equal(recipe.EnergyRequiredTicks, sim.Player.CraftQueue[0].Progress);
+    }
 }
