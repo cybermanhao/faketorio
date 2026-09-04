@@ -1,6 +1,7 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
+using Faketorio.Sim.Items;
 using Faketorio.Sim.Prototypes;
 using Faketorio.Sim.State;
 using Faketorio.Sim.World;
@@ -13,6 +14,11 @@ public sealed class Simulation
     public WorldGrid World { get; } = new();
     public EntityPool<EntityData> Entities { get; } = new();
     public BeltNetwork Belts { get; } = new();
+
+    // 分层说明:BeltNetwork 刻意"不知道 Simulation / Entities";Inventories
+    // 反过来直接收 EntityId。这是有意的偏差——EntityId 只是个裸 readonly
+    // record struct(不依赖 EntityPool),拿它当键不引入对实体池的依赖。
+    public Inventories Inventories { get; } = new();
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
 
@@ -96,6 +102,7 @@ public sealed class Simulation
         }
 
         Belts.WriteState(writer);
+        Inventories.WriteState(writer);
     }
 
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
@@ -131,6 +138,8 @@ public sealed class Simulation
                 World.OccupyArea(command.X, command.Y, proto.TileWidth, proto.TileHeight, id);
                 if (proto is TransportBeltPrototype)
                     Belts.AddBelt(command.X, command.Y, command.Rotation);
+                if (proto is ContainerPrototype cp)
+                    Inventories.AddContainer(id, cp.InventorySize);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -149,10 +158,13 @@ public sealed class Simulation
                 }
                 int bx = data.X, by = data.Y;
                 bool isBelt = proto is TransportBeltPrototype;
+                bool isContainer = proto is ContainerPrototype;
                 World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
                 Entities.Destroy(id);
                 if (isBelt)
                     Belts.RemoveBelt(bx, by);
+                if (isContainer)
+                    Inventories.RemoveContainer(id);   // M1: 返回的物品总数丢弃(策略层 P5 起再定)
                 return;
             }
             default:

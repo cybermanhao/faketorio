@@ -1,6 +1,7 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Entities;
+using Faketorio.Sim.Items;
 using Faketorio.Sim.Prototypes;
 
 namespace Faketorio.Sim.Tests;
@@ -222,6 +223,59 @@ public class SimulationTests
         sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 0, Y = 0 });
         sim.Step(); // isBelt 守卫:不得抛
         Assert.Equal(0, LiveLineCount(sim.Belts));
+        Assert.Equal(0, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void PlaceChest_CreatesInventory_WithSixteenSlots()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 3, 4));
+        sim.Step();
+        var e = sim.World.GetEntityAt(3, 4);
+        var invId = sim.Inventories.GetInventoryId(e);
+        Assert.True(invId.IsValid);
+        Assert.Equal(16, sim.Inventories.Get(invId).SlotCount);
+    }
+
+    [Fact]
+    public void PlaceLargeChest_CreatesInventory_WithFortyEightSlots()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceLargeChest(sim, -33, -33));
+        sim.Step();
+        var e = sim.World.GetEntityAt(-33, -33);
+        var invId = sim.Inventories.GetInventoryId(e);
+        Assert.True(invId.IsValid);
+        Assert.Equal(48, sim.Inventories.Get(invId).SlotCount);
+    }
+
+    [Fact]
+    public void RemoveChest_DestroysInventory()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 0));
+        sim.Step();
+        var e = sim.World.GetEntityAt(0, 0);
+        var invId = sim.Inventories.GetInventoryId(e);
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 0, Y = 0 });
+        sim.Step();
+
+        Assert.Equal(InventoryId.Invalid, sim.Inventories.GetInventoryId(e));
+        Assert.False(sim.Inventories.IsAliveAtIndex(invId.Index));
+        Assert.Equal(0, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void RemoveNonContainerEntity_DoesNotTouchInventories()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 5, E));
+        sim.Step();
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 5, Y = 5 });
+        sim.Step();   // isContainer 守卫:不得抛
+        Assert.Equal(0, sim.Inventories.Capacity);
         Assert.Equal(0, sim.RejectedCommandCount);
     }
 }
