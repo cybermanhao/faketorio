@@ -90,4 +90,65 @@ public class DeterminismTests
     {
         Assert.Equal(RunBeltScenario(), RunBeltScenario());
     }
+
+    // 箱子 + 物品插入 + 拆除的代表性场景。物品直接经 Inventories 写入
+    // (不走命令)——与 RunBeltScenario 里直接调 LaneA.TryInsertAtBack 同理。
+    private static List<ulong> RunInventoryScenario()
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"));
+        int chest = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id;
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        var hashes = new List<ulong>();
+
+        for (int t = 0; t < 60; t++)
+        {
+            if (t == 0) sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = chest, X = 2, Y = 2 });
+            if (t == 1) sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = chest, X = 5, Y = 2 });
+            if (t == 40) sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 5, Y = 2 });
+
+            if (t is >= 2 and < 40 && t % 4 == 2)
+            {
+                var a = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+                a.Insert(plate, 7, plateStack);
+                var b = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(5, 2)));
+                b.Insert(coal, 3, coalStack);
+            }
+            if (t is >= 10 and < 40 && t % 9 == 1)
+            {
+                var a = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+                a.Remove(plate, 5);
+            }
+
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void InventoryScenario_SameCommands_SameHashEveryTick()
+    {
+        Assert.Equal(RunInventoryScenario(), RunInventoryScenario());
+    }
+
+    [Fact]
+    public void HashChangesWhenItemInserted()
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"));
+        int chest = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id;
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = chest, X = 1, Y = 1 });
+        sim.Step();
+        var before = sim.ComputeStateHash();
+
+        var inv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(1, 1)));
+        inv.Insert(plate, 5, plateStack);
+
+        Assert.NotEqual(before, sim.ComputeStateHash());
+    }
 }
