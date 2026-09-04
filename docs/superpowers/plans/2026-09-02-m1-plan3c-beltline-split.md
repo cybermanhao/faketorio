@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 merge `54e7457`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 实现"移除一格传送带"——`BeltLane.ShrinkBack`/`ShrinkFront` 两个截短原语,`TileToLineIndex.Clear`,以及 `BeltNetwork.RemoveBelt`(单格线销毁 / 出口端摘除 / 入口端摘除 / 中间拆分四种,返回被丢弃物品计数)。配独立单测。不接入 `Simulation`。
 
 **Architecture:** 端点摘除与中间拆分的前半段都在**原线上就地截短**(`ShrinkBack`/`ShrinkFront`,`BeltLineId` 不变、tile 索引 churn 最小);只有中间拆分的**后半段**是一条全新 `BeltLine`(用 3a 的 `ToAbsolutePositions`/`FromAbsolutePositions` 从快照重建)。断口处"前沿在存活侧、身体跨进被移格"的物品按丢弃处理,清除区间向前拓宽 `ItemWidthSubTiles - 1`。物品去向不是本层的事——`RemoveBelt` 只摘下、计数、返回。

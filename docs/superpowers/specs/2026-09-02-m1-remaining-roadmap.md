@@ -4,6 +4,35 @@
 状态: 已与用户确认的拆分基线
 配套参考: [`docs/superpowers/specs/2026-07-03-faketorio-design.md`](2026-07-03-faketorio-design.md)(第 5 节模拟层、第 7 节路线图 M1)
 
+## 进度快照(2026-09-04)
+
+`main` HEAD `ee36c52`;`dotnet test sim/Faketorio.Sim.Tests` = **235 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+
+| 子项目 | 状态 | 主线提交(合并后) |
+|---|---|---|
+| **P1** 模拟核心地基(原型/实体池/世界网格/命令队列/状态哈希) | ✅ 已合并·已验证 | `95db82c`..`180aa3c` |
+| **P2** 传送带 FFF-176 gap 表示法(BeltLane) | ✅ 已合并·已验证 | `72e64ed`..`6ac95e0` |
+| **P3a** BeltLane 合并/拆分原语 | ✅ 已合并·已验证 | merge `9bd0198` |
+| **P3b** BeltLine + 放置期三路合并 | ✅ 已合并·已验证 | merge `87025f2` |
+| **P3c** BeltLine 拆分(RemoveBelt) | ✅ 已合并·已验证 | merge `54e7457` |
+| **P3d** BeltNetwork ↔ Simulation 接线 + 每 tick 推进 + 拐角交接 | ✅ 已合并·已验证 | merge `be551b4` |
+| **P4** 库存(ItemStack + Inventory + InventoryPool + Inventories 接线) | ✅ 已合并·已验证 | `55539e8`..`58f65f1` |
+| **P6** 矿脉生成(DeterministicHash + ValueNoise + ResourceGrid + seed 接线) | ✅ 已合并·已验证 | `f45232b`..`ee36c52` |
+| **P5** 玩家实体 + 位置 + MovePlayer + 玩家背包 + HandMine + HandCraft + 开局物资包 | ⬜ 未开始 | — |
+| **P7** 电网(电线杆连通分量 + supply_area + 每 tick 每网结算 + 缺电降速 + satisfaction) | ⬜ 未开始 | — |
+| **P8** 燃料发电机(Burner 入 + Electric primary-output 出) | ⬜ 未开始(可并入 P7) | — |
+| **P9** 加工状态机(熔炉 + 装配机共用) | ⬜ 未开始 | — |
+| **P10** 电力采矿机 | ⬜ 未开始 | — |
+| **P11** 机械臂(belt lane ↔ inventory 抓/放) | ⬜ 未开始 | — |
+| 横切 · **typed belt items**(BeltLane 目前只表达位置+数量;`TryInsertAtBack()` 不收 `ItemPrototype`) | ⬜ 未立项 · **P10 之前必须** | — |
+| 横切 · RotateEntity 命令 | ⬜ 未立项(跟 P5 或单独小 plan) | — |
+| 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项(等 P9 有机器状态) | — |
+| 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ⬜ 未立项 · **建议 P7/P9 前立最小回归基线**(当前仓库无 CI / 无基准项目) | — |
+
+完成度分层看:M1 模拟基础设施 ≈ P1–P4/P6 已落地;M1 可玩闭环(玩家 / 手动 / 电力 / 机器 / 采矿机 / 机械臂)未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。
+
+下一步:**P5**——它第一次把库存 + 资源 + 配方 + 命令系统组合成可玩闭环,尽早暴露接口问题。P5 的 brainstorm 里先确认「是否需要先做 typed belt items」这个依赖(手挖进玩家背包不碰传送带,所以大概率不必卡在 P5 前,但不能晚于 P10)。
+
 ## 0. 背景
 
 M1 传送带链(Plan 3a/3b/3c/3d)已全部合并进 `main`。M1 路线图剩下的部分——玩家、库存、手挖手搓、开局物资包、电力采矿机、机械臂、熔炉、装配机、箱子行为、燃料发电机 + 电线杆 + 电网结算、矿脉生成——之间有依赖,本文把它拆成顺序执行、各自独立可测的子项目(下称 P4、P5…,接在 Plan 1/2/3 之后)。

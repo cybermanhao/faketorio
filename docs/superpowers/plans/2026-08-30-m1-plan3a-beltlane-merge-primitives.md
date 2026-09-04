@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 merge `9bd0198`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 给已完成的 `BeltLane` 追加 6 个"贴到 `Simulation` 才需要"的能力(线段延长、绝对位置互转、范围摘除、规范序列化),不改动任何既有方法,不引入 `BeltLine`/`Simulation`。
 
 **Architecture:** 全部作为 `BeltLane`(`sim/Faketorio.Sim/Belts/BeltLane.cs`)上的新增公开方法,复用其现有内部表示(`_gaps` 相对 gap 列表、`_lineLengthSubTiles`、`_openIndex` 游标)。唯一的结构改动是把 `_lineLengthSubTiles` 从 `readonly` 改为可变(`ExtendBack`/`ExtendFront` 要写它)。每个方法配一组 xUnit 单测,追加进现有的 `BeltLaneTests.cs`。

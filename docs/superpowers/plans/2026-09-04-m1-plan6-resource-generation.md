@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `f45232b`..`ee36c52`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Add a deterministic, seed-driven, lazily-generated ore layer to the simulation — fixed-point value-noise generation, a chunked `ResourceGrid` holding mutable per-tile ore amounts, and `GetResourceAt` / `Extract` queries.
 
 **Architecture:** Two standalone integer/fixed-point primitives (`DeterministicHash` splitmix64, `ValueNoise` Q16.16 fBm) — no `float`/`double` anywhere. Each `ResourcePrototype` carries its own `NoiseLayer` (independent field, threshold, richness); per tile the resource with the largest normalized excess wins, ties by prototype Id. `ResourceGrid` mirrors `WorldGrid`'s 32×32 chunking, generates a chunk (a pure function of `(seed, tileX, tileY)`) on first touch, then overlays seed-independent starter patches near the origin so the P5 bootstrap always has ore. `Simulation` gains a `worldSeed` ctor arg and a `Resources` property; `WriteState` writes the seed and the generated chunks; `Step` is unchanged.

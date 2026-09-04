@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `95db82c`..`180aa3c`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 建立可无头运行的确定性模拟核心:prototype 数据管线、代数 ID 实体池、chunk 世界网格、命令队列 + 固定 tick 循环、状态哈希,全部有 xUnit 测试覆盖。
 
 **Architecture:** 纯 .NET 类库 `Faketorio.Sim`(零 Godot 依赖)+ xUnit 测试工程。数据层为 POCO + JSON;世界变更只经命令队列在 tick 边界应用;所有状态经 `IStateWriter` 规范序列化(哈希与未来存档共用)。本计划是 M1 四个计划中的第 1 个,后续计划(传送带、电网+机器、表现层)在此地基上叠加。

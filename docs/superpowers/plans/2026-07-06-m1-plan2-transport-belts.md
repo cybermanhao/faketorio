@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `72e64ed`..`6ac95e0`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 实现并用严格的单测证明正确的传送带核心算法(FFF-176 的 gap 表示法),外加传送带 prototype 的数据支持——两者都是独立、可单测的构件,尚不接入 `Simulation`。
 
 **Architecture:** `BeltLane` 是一个纯数据结构(不依赖 Godot、不依赖 `Simulation`/`EntityPool`/`WorldGrid`),表示一条传送带 lane 上的物品流:物品不存绝对坐标,只存相对 gap(整数亚格单位)。正常流动只需增减最前面一个 gap(O(1));堵塞时通过 `_openIndex` 缓存"最后一个未压缩到 0 的 gap"下标,该下标只前移不回退,使更新摊还 O(1)。`TransportBeltPrototype` 走既有的 POCO + JSON 数据管线(与 M1 Plan 1 的 `ContainerPrototype` 同构)。

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `55539e8`..`58f65f1`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Give the simulation layer a slot-based inventory (`ItemStack`, `Inventory`, `InventoryPool`, `EntityId → InventoryId` reverse lookup) and wire container entities to it (build on place, destroy on remove).
 
 **Architecture:** Three new files under `sim/Faketorio.Sim/Items/`. `ItemStack` is a `readonly record struct` (item proto id + count, `Empty == default`). `Inventory` is a `sealed class` holding a fixed-length `ItemStack[]`, prototype-agnostic like `BeltLane` (stack size is passed in per call). `InventoryPool` is a deliberate parallel of `BeltLinePool` (generational-id pool for a reference type, since `EntityPool<T>` is `where T : struct`). `Inventories` is the container class that owns the pool plus two index-aligned sparse arrays (`_byEntity` keyed by `EntityId.Index`, `_ownerByIndex` keyed by pool index) and is the only place `Simulation` touches. `Simulation.Apply` gains container hooks in `PlaceEntity`/`RemoveEntity`; `Simulation.WriteState` appends `Inventories.WriteState` after `Belts.WriteState`. `Step` is unchanged — containers are passive in M1.

@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 merge `be551b4`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 把已建好的 `BeltNetwork`(合并/拆分)接进 `Simulation`——放置/拆除传送带触发 `AddBelt`/`RemoveBelt`,每 tick 在 `Simulation.Step` 里推进所有线并做拐角处的线间交接,`Simulation.WriteState` 覆盖传送带状态。配集成 + 确定性测试。
 
 **Architecture:** 推进与线间交接**直接写在 `Simulation.Step` 里**(不新增 `BeltNetwork.Advance`)。`BeltNetwork` 只把 `Delta(byte)` 暴露成 `public static`;其余靠 3b 已有的 `Capacity`/`IsAliveAtIndex`/`GetAtIndex`/`GetLineAt`/`GetLine`。速度按线解析:私有 `Simulation.ResolveBeltSpeed(line)` 走 `line.Tiles[0]` → 实体 → `TransportBeltPrototype`。线间交接只认"前方邻格 == 下游线入口端"(`down.Tiles[^1] == front`),**不检查方向**(同向端点相邻的两条线在放置时已被合并,不会共存;交接服务的是拐角)。

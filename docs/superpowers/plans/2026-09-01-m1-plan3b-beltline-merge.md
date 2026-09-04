@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 merge `87025f2`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** 引入 `BeltLineId` / `BeltLinePool` / `BeltLine` / `BeltNetwork`,并实现"放置一格传送带时把连续同向直线段焊成一条 `BeltLine`"的合并算法(单侧 / 三路 / 都不接),配独立单测。不接入 `Simulation`。
 
 **Architecture:** `BeltLine` 是一个哑数据壳(方向 + `Tiles` 坐标列表 + 两条 `BeltLane`)。`BeltLinePool` 是一份刻意的、与 `EntityPool<T>` 平行的引用类型代数 ID 池(`EntityPool<T> where T : struct` 不改)。`BeltNetwork` 持有池 + 一个 `tile → BeltLineId` 的分块稀疏索引(`TileToLineIndex`),对外只暴露 `AddBelt(x, y, direction)`、按池索引序遍历、`WriteState`。合并只查 `TileToLineIndex`,焊接复用 Plan 3a 的 `BeltLane.ExtendBack`/`ExtendFront`(单侧)与 `ToAbsolutePositions`/`FromAbsolutePositions`(三路拼接)。
