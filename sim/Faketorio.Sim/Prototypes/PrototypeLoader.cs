@@ -39,6 +39,22 @@ public static class PrototypeLoader
 
         if (mapGenCount > 1)
             throw new InvalidDataException("More than one 'map-gen' prototype");
+
+        // 跨引用校验(starter patch):只要有 map-gen 就跑,与是否有 resource 无关——
+        // 否则"有矿斑、无 resource"会加载通过,之后在 ResourceGrid 构造里炸 KeyNotFound。
+        if (mapGen is not null)
+        {
+            foreach (var sp in mapGen.StarterPatches)
+            {
+                if (!registry.TryGet<ResourcePrototype>(sp.Resource, out _))
+                    throw new InvalidDataException($"Starter patch references unknown resource '{sp.Resource}'");
+                if (sp.Radius < 1)
+                    throw new InvalidDataException($"Starter patch for '{sp.Resource}': radius must be >= 1");
+                if (sp.CenterAmount < 1)
+                    throw new InvalidDataException($"Starter patch for '{sp.Resource}': centerAmount must be >= 1");
+            }
+        }
+
         if (resources.Count == 0)
             return;                       // 没有矿:map-gen 可有可无,无需解析
         if (mapGen is null)
@@ -62,20 +78,12 @@ public static class PrototypeLoader
                 throw new InvalidDataException($"Resource '{r.Name}': thresholdQ16 {L.ThresholdQ16} out of range 1..65535");
             if (r.RichnessBase < 1)
                 throw new InvalidDataException($"Resource '{r.Name}': richnessBase must be >= 1");
+            if (r.RichnessScale < 0 || r.RichnessScale > 1_000_000)
+                throw new InvalidDataException($"Resource '{r.Name}': richnessScale must be in 0..1000000");
             if (!registry.TryGet<ItemPrototype>(r.MinableResult, out _))
                 throw new InvalidDataException($"Resource '{r.Name}': minableResult '{r.MinableResult}' has no matching item");
 
             r.Layer = L with { FieldId = fieldId, LatticeSize = lattice, Octaves = octaves };
-        }
-
-        foreach (var sp in mapGen.StarterPatches)
-        {
-            if (!registry.TryGet<ResourcePrototype>(sp.Resource, out _))
-                throw new InvalidDataException($"Starter patch references unknown resource '{sp.Resource}'");
-            if (sp.Radius < 1)
-                throw new InvalidDataException($"Starter patch for '{sp.Resource}': radius must be >= 1");
-            if (sp.CenterAmount < 1)
-                throw new InvalidDataException($"Starter patch for '{sp.Resource}': centerAmount must be >= 1");
         }
     }
 

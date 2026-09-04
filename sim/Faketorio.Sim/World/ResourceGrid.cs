@@ -53,8 +53,8 @@ public sealed class ResourceGrid
 
     public int Extract(int x, int y, int count)
     {
-        var chunk = Ensure(x, y);
         if (count <= 0) return 0;
+        var chunk = Ensure(x, y);
         int i = TileIndex(x, y);
         if (chunk.TypeId[i] == 0) return 0;
         int take = Math.Min(chunk.Amount[i], count);

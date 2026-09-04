@@ -80,13 +80,11 @@ public class ResourceGridTests
     public void Extract_NonPositiveCount_ReturnsZero_NoChange()
     {
         var g = new ResourceGrid(0, Reg());
-        var h = Hash(g);                                   // nothing generated yet
+        var h = Hash(g);                       // nothing generated
         Assert.Equal(0, g.Extract(6, -8, 0));
         Assert.Equal(0, g.Extract(6, -8, -5));
-        // 上面两次调用触发了 chunk 生成但没改矿量;和"生成后未 extract"的哈希一致
-        var g2 = new ResourceGrid(0, Reg());
-        g2.GetResourceAt(6, -8);
-        Assert.Equal(Hash(g2), Hash(g));
+        Assert.Equal(h, Hash(g));              // guard is first — no chunk generated, no state change
+        Assert.Equal(0, g.GeneratedChunkCount);
     }
 
     [Fact]

@@ -154,6 +154,13 @@ public class PrototypeLoaderTests
         "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
 
     [Fact]
+    public void RichnessScaleNegative_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000 }, \"richnessBase\": 400, \"richnessScale\": -1 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
     public void ResourceMinableResultMissingItem_Throws() => AssertLoadThrows(
         "[{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"nonexistent\", " +
         "\"noise\": { \"thresholdQ16\": 44000 }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
@@ -164,4 +171,9 @@ public class PrototypeLoaderTests
         $"[{ValidItem}, {ValidResource}, " +
         "{ \"type\": \"map-gen\", \"name\": \"default\", \"starterPatches\": " +
         "[{ \"resource\": \"nonexistent\", \"centerX\": 0, \"centerY\": 0, \"radius\": 3, \"centerAmount\": 100 }] }]");
+
+    [Fact]
+    public void StarterPatchWithNoResourcePrototypes_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"map-gen\", \"name\": \"default\", \"starterPatches\": " +
+        "[{ \"resource\": \"coal\", \"centerX\": 0, \"centerY\": 0, \"radius\": 3, \"centerAmount\": 100 }] }]");
 }
