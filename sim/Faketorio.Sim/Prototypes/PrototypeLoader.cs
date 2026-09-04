@@ -17,6 +17,7 @@ public static class PrototypeLoader
         }
         registry.AssignIds();
         ResolveAndValidateMapGen(registry);
+        ResolveAndValidateRecipesAndPlayer(registry);
         return registry;
     }
 
@@ -87,6 +88,60 @@ public static class PrototypeLoader
         }
     }
 
+    // AssignIds() 之后:把每个 RecipePrototype 的 Ingredients/Results 名字解析成
+    // proto id,再校验 player prototype。与 ResolveAndValidateMapGen 同风格。
+    private static void ResolveAndValidateRecipesAndPlayer(PrototypeRegistry registry)
+    {
+        int playerCount = 0;
+        PlayerPrototype? player = null;
+        for (int i = 0; i < registry.Count; i++)
+        {
+            switch (registry.GetById(i))
+            {
+                case RecipePrototype r:
+                    r.ResolvedIngredients = Resolve(registry, r, r.Ingredients, "ingredient");
+                    r.ResolvedResults     = Resolve(registry, r, r.Results, "result");
+                    break;
+                case PlayerPrototype p:
+                    player = p; playerCount++;
+                    break;
+            }
+        }
+
+        if (playerCount > 1)
+            throw new InvalidDataException("More than one 'player' prototype");
+
+        if (player is not null)
+        {
+            if (player.InventorySize < 1)
+                throw new InvalidDataException("player: inventorySize must be >= 1");
+            if (player.ReachSubTiles < 1)
+                throw new InvalidDataException("player: reachSubTiles must be >= 1");
+            if (player.WalkSpeedSubTilesPerTick < 1)
+                throw new InvalidDataException("player: walkSpeedSubTilesPerTick must be >= 1");
+            if (player.CraftQueueCap < 1)
+                throw new InvalidDataException("player: craftQueueCap must be >= 1");
+            foreach (var ia in player.StartingInventory)
+                if (!registry.TryGet<ItemPrototype>(ia.Name, out _))
+                    throw new InvalidDataException($"player: startingInventory item '{ia.Name}' has no matching item");
+        }
+    }
+
+    private static IReadOnlyList<ResolvedAmount> Resolve(
+        PrototypeRegistry registry, RecipePrototype r, List<ItemAmount> src, string role)
+    {
+        var list = new List<ResolvedAmount>(src.Count);
+        foreach (var ia in src)
+        {
+            if (ia.Amount < 1)
+                throw new InvalidDataException($"Recipe '{r.Name}': {role} '{ia.Name}' amount must be >= 1");
+            if (!registry.TryGet<ItemPrototype>(ia.Name, out var item))
+                throw new InvalidDataException($"Recipe '{r.Name}': {role} '{ia.Name}' has no matching item");
+            list.Add(new ResolvedAmount(item.Id, ia.Amount));
+        }
+        return list;
+    }
+
     private static PrototypeBase Parse(JsonElement el)
     {
         string type = el.GetProperty("type").GetString()!;
@@ -132,6 +187,7 @@ public static class PrototypeLoader
                 MinableResult = el.GetProperty("minableResult").GetString()!,
                 RichnessBase  = GetInt(el, "richnessBase", 0),
                 RichnessScale = GetInt(el, "richnessScale", 0),
+                MiningTimeTicks = Units.SecondsToTicks(GetDouble(el, "miningTimeSeconds", 1.0)),
                 Layer = ParseNoiseLayer(el),
             },
             "map-gen" => new MapGenPrototype
@@ -140,6 +196,16 @@ public static class PrototypeLoader
                 DefaultLatticeSize = GetInt(el, "defaultLatticeSize", 64),
                 DefaultOctaves     = GetInt(el, "defaultOctaves", 3),
                 StarterPatches     = ParseStarterPatches(el),
+            },
+            "player" => new PlayerPrototype
+            {
+                Name = name,
+                InventorySize            = GetInt(el, "inventorySize", 60),
+                ReachSubTiles            = GetInt(el, "reachSubTiles", 1536),
+                WalkSpeedSubTilesPerTick = GetInt(el, "walkSpeedSubTilesPerTick", 38),
+                CraftQueueCap            = GetInt(el, "craftQueueCap", 32),
+                StartingInventory        = ParseAmounts(el.TryGetProperty("startingInventory", out var si)
+                    ? si : default).AsReadOnly(),
             },
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
@@ -187,12 +253,13 @@ public static class PrototypeLoader
     private static List<ItemAmount> ParseAmounts(JsonElement arr)
     {
         var list = new List<ItemAmount>();
-        foreach (var el in arr.EnumerateArray())
-            list.Add(new ItemAmount
-            {
-                Name = el.GetProperty("name").GetString()!,
-                Amount = el.GetProperty("amount").GetInt32(),
-            });
+        if (arr.ValueKind == JsonValueKind.Array)
+            foreach (var el in arr.EnumerateArray())
+                list.Add(new ItemAmount
+                {
+                    Name = el.GetProperty("name").GetString()!,
+                    Amount = el.GetProperty("amount").GetInt32(),
+                });
         return list;
     }
 

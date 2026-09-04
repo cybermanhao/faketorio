@@ -19,6 +19,7 @@ public sealed class ResourcePrototype : PrototypeBase
     public NoiseLayer Layer  { get; internal set; } = new(0, 0, 0, 0);  // 解析 pass 后全字段具体
     public int RichnessBase  { get; init; }               // 有矿时的最低矿量(>= 1)
     public int RichnessScale { get; init; }               // 额外矿量 = RichnessScale·excess >> 16
+    public int MiningTimeTicks { get; init; } = 60;        // 矿脉每单位挖掘 tick 数
 }
 
 public sealed class MapGenPrototype : PrototypeBase       // 单例,约定 name = "default"

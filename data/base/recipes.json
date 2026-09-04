@@ -1,5 +1,11 @@
 [
   { "type": "recipe", "name": "iron-plate", "category": "smelting", "energyRequiredSeconds": 3.2,
     "ingredients": [ { "name": "iron-ore", "amount": 1 } ],
-    "results": [ { "name": "iron-plate", "amount": 1 } ] }
+    "results": [ { "name": "iron-plate", "amount": 1 } ] },
+  { "type": "recipe", "name": "iron-gear-wheel", "category": "crafting", "energyRequiredSeconds": 0.5,
+    "ingredients": [ { "name": "iron-plate", "amount": 2 } ],
+    "results": [ { "name": "iron-gear-wheel", "amount": 1 } ] },
+  { "type": "recipe", "name": "wooden-chest", "category": "crafting", "energyRequiredSeconds": 0.5,
+    "ingredients": [ { "name": "iron-plate", "amount": 2 } ],
+    "results": [ { "name": "wooden-chest", "amount": 1 } ] }
 ]

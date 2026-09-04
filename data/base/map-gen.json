@@ -3,5 +3,6 @@
      { "resource": "coal",       "centerX":  6, "centerY": -8, "radius": 4, "centerAmount": 1500 },
      { "resource": "iron-ore",   "centerX": -9, "centerY": -6, "radius": 5, "centerAmount": 2000 },
      { "resource": "copper-ore", "centerX": -8, "centerY":  9, "radius": 4, "centerAmount": 1500 },
-     { "resource": "stone",      "centerX":  9, "centerY":  7, "radius": 3, "centerAmount": 1000 }
+     { "resource": "stone",      "centerX":  9, "centerY":  7, "radius": 3, "centerAmount": 1000 },
+     { "resource": "coal", "centerX": 1, "centerY": -1, "radius": 2, "centerAmount": 800 }
    ]}]

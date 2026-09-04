@@ -208,4 +208,46 @@ public class InventoryTests
     {
         Assert.NotEqual(Hash(new Inventory(4)), Hash(new Inventory(5)));
     }
+
+    [Fact]
+    public void CanInsert_EmptyInventory_FitsUpToCapacity()
+    {
+        var inv = new Inventory(2);
+        Assert.True(inv.CanInsert(Iron, 100, Stack));    // 2 slots × 50
+        Assert.False(inv.CanInsert(Iron, 101, Stack));
+    }
+
+    [Fact]
+    public void CanInsert_CountsPartialSameTypeSlots()
+    {
+        var inv = new Inventory(2);
+        inv.Insert(Iron, 45, Stack);                     // slot 0: 45/50
+        Assert.True(inv.CanInsert(Iron, 55, Stack));     // 5 top-up + 50 in slot 1
+        Assert.False(inv.CanInsert(Iron, 56, Stack));
+    }
+
+    [Fact]
+    public void CanInsert_ZeroCount_True_NegativeOrBadStack_False()
+    {
+        var inv = new Inventory(2);
+        Assert.True(inv.CanInsert(Iron, 0, Stack));
+        Assert.False(inv.CanInsert(Iron, -1, Stack));
+        Assert.False(inv.CanInsert(Iron, 10, 0));
+    }
+
+    [Fact]
+    public void CanInsert_ReadOnlyOrFilterMismatch_False()
+    {
+        Assert.False(new Inventory(4, readOnly: true).CanInsert(Iron, 1, Stack));
+        Assert.False(new Inventory(4, filterItemProtoId: Iron).CanInsert(Copper, 1, Stack));
+    }
+
+    [Fact]
+    public void CanInsert_DoesNotMutate()
+    {
+        var inv = new Inventory(2);
+        var h = Hash(inv);
+        inv.CanInsert(Iron, 40, Stack);
+        Assert.Equal(h, Hash(inv));
+    }
 }

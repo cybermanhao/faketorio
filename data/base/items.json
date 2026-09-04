@@ -4,5 +4,6 @@
   { "type": "item", "name": "coal", "stackSize": 50, "fuelValue": "4MJ", "fuelCategory": "chemical" },
   { "type": "item", "name": "wooden-chest", "stackSize": 50, "placeResult": "wooden-chest" },
   { "type": "item", "name": "copper-ore", "stackSize": 50 },
-  { "type": "item", "name": "stone", "stackSize": 50 }
+  { "type": "item", "name": "stone", "stackSize": 50 },
+  { "type": "item", "name": "iron-gear-wheel", "stackSize": 100 }
 ]

@@ -91,7 +91,7 @@ public class PrototypeLoaderTests
     public void LoadsMapGenWithStarterPatches()
     {
         var mg = Load().Get<MapGenPrototype>("default");
-        Assert.Equal(4, mg.StarterPatches.Count);
+        Assert.Equal(5, mg.StarterPatches.Count);
         Assert.Equal(new StarterPatch("coal", 6, -8, 4, 1500), mg.StarterPatches[0]);
     }
 
@@ -176,4 +176,48 @@ public class PrototypeLoaderTests
     public void StarterPatchWithNoResourcePrototypes_Throws() => AssertLoadThrows(
         "[{ \"type\": \"map-gen\", \"name\": \"default\", \"starterPatches\": " +
         "[{ \"resource\": \"coal\", \"centerX\": 0, \"centerY\": 0, \"radius\": 3, \"centerAmount\": 100 }] }]");
+
+    [Fact]
+    public void ResolvesRecipeIngredientAndResultItemIds()
+    {
+        var reg = Load();
+        var gear = reg.Get<RecipePrototype>("iron-gear-wheel");
+        int plateId = reg.Get<ItemPrototype>("iron-plate").Id;
+        int gearId = reg.Get<ItemPrototype>("iron-gear-wheel").Id;
+        Assert.Equal(new[] { new ResolvedAmount(plateId, 2) }, gear.ResolvedIngredients);
+        Assert.Equal(new[] { new ResolvedAmount(gearId, 1) }, gear.ResolvedResults);
+    }
+
+    [Fact]
+    public void LoadsPlayerPrototype()
+    {
+        var p = Load().Get<PlayerPrototype>("player");
+        Assert.Equal(60, p.InventorySize);
+        Assert.Equal(1536, p.ReachSubTiles);
+        Assert.Equal(2, p.StartingInventory.Count);
+        Assert.Equal("iron-plate", p.StartingInventory[0].Name);
+    }
+
+    [Fact]
+    public void RecipeWithUnknownItem_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"recipe\", \"name\": \"bad\", \"category\": \"crafting\", " +
+        "\"ingredients\": [ { \"name\": \"nonexistent\", \"amount\": 1 } ], " +
+        "\"results\": [ { \"name\": \"nonexistent\", \"amount\": 1 } ] }]");
+
+    [Fact]
+    public void TwoPlayerPrototypes_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"player\", \"name\": \"a\" }, { \"type\": \"player\", \"name\": \"b\" }]");
+
+    [Fact]
+    public void PlayerInventorySizeZero_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"player\", \"name\": \"player\", \"inventorySize\": 0 }]");
+
+    [Fact]
+    public void PlayerStartingInventoryUnknownItem_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"player\", \"name\": \"player\", " +
+        "\"startingInventory\": [ { \"name\": \"nonexistent\", \"amount\": 1 } ] }]");
+
+    [Fact]
+    public void PlayerReachZero_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"player\", \"name\": \"player\", \"reachSubTiles\": 0 }]");
 }

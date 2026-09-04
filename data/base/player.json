@@ -1,0 +1,6 @@
+[{ "type": "player", "name": "player",
+   "inventorySize": 60, "reachSubTiles": 1536, "walkSpeedSubTilesPerTick": 38, "craftQueueCap": 32,
+   "startingInventory": [
+     { "name": "iron-plate", "amount": 8 },
+     { "name": "wooden-chest", "amount": 1 }
+   ] }]

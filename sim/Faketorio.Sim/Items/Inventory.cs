@@ -55,6 +55,28 @@ public sealed class Inventory
         return count - remaining;
     }
 
+    // 只读模拟 Insert 的两轮:能否把 count 件全放下。不改状态(§6.2 手搓完成前预检)。
+    public bool CanInsert(int itemProtoId, int count, int stackSize)
+    {
+        if (ReadOnly) return false;
+        if (FilterItemProtoId != 0 && itemProtoId != FilterItemProtoId) return false;
+        if (count < 0 || stackSize <= 0) return false;
+        if (count == 0) return true;
+
+        int remaining = count;
+        for (int i = 0; i < _slots.Length && remaining > 0; i++)
+        {
+            if (_slots[i].ItemProtoId != itemProtoId || _slots[i].Count >= stackSize) continue;
+            remaining -= Math.Min(stackSize - _slots[i].Count, remaining);
+        }
+        for (int i = 0; i < _slots.Length && remaining > 0; i++)
+        {
+            if (!_slots[i].IsEmpty) continue;
+            remaining -= Math.Min(stackSize, remaining);
+        }
+        return remaining == 0;
+    }
+
     // 从前往后扣持有 itemProtoId 的槽,扣到 0 的槽整个置 ItemStack.Empty。
     // count <= 0 → 0(与 Insert 对称;缺了它 Remove(x,-5) 会扣 min(3,-5)=-5,
     // 槽数量反而增加、返回负,静默污染)。返回实际取出数(<= count)。
