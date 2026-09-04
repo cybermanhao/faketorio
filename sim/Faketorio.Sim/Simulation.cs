@@ -52,6 +52,7 @@ public sealed class Simulation
 
         // 玩家 tick:① 行走(碰撞) ② 挖掘(Task 3) ③ 合成(Task 4)
         PlayerWalk();
+        PlayerMine();
 
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
@@ -137,6 +138,53 @@ public sealed class Simulation
         Player.MoveTo(nx, ny);
     }
 
+    private void PlayerMine()
+    {
+        if (!Player.Mining) return;
+        int tx = Player.MineTargetX, ty = Player.MineTargetY;
+
+        // reach:玩家点到目标格中心的欧氏距离(整数 sqrt,P6)
+        long ddx = Player.X - (tx * 256 + 128);
+        long ddy = Player.Y - (ty * 256 + 128);
+        if (ValueNoise.Isqrt(ddx * ddx + ddy * ddy) > _playerProto.ReachSubTiles) return;
+
+        // 解析目标:优先实体,其次矿脉
+        var eid = World.GetEntityAt(tx, ty);
+        EntityPrototype? entityProto = null;
+        if (eid.IsValid && Entities.IsAlive(eid)
+            && Prototypes.TryGetById(Entities.Get(eid).ProtoId, out var ep)
+            && ep is EntityPrototype epx && epx.MinableResult is not null)
+            entityProto = epx;
+
+        ResourcePrototype? resProto = null;
+        if (entityProto is null)
+        {
+            var cell = Resources.GetResourceAt(tx, ty);
+            if (!cell.IsEmpty)
+                resProto = (ResourcePrototype)Prototypes.GetById(cell.ResourceProtoId);
+        }
+
+        if (entityProto is null && resProto is null) return;   // 空转
+
+        int threshold = entityProto?.MiningTimeTicks ?? resProto!.MiningTimeTicks;
+        if (Player.MineProgress < threshold) Player.TickMineProgress();
+        if (Player.MineProgress < threshold) return;
+
+        string resultName = entityProto?.MinableResult ?? resProto!.MinableResult;
+        var itemProto = Prototypes.Get<ItemPrototype>(resultName);
+        if (Player.Inventory.Insert(itemProto.Id, 1, itemProto.StackSize) == 0) return;   // 背包满:停在阈值
+
+        if (entityProto is not null)
+        {
+            DestroyEntityAt(eid, entityProto);   // 目标失效,下 tick 空转
+        }
+        else
+        {
+            Resources.Extract(tx, ty, 1);        // 必返回 1(刚查过非空)
+            Player.ClearMineProgress();           // 继续挖
+        }
+    }
+
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
     // 严格:出口格上一定是传送带实体,不做 fallback。
     private int ResolveBeltSpeed(BeltLine line)
@@ -197,6 +245,12 @@ public sealed class Simulation
                 return;
             case CommandType.StopPlayer:
                 Player.StopWalk();
+                return;
+            case CommandType.MineStart:
+                Player.SetMineTarget(command.X, command.Y);
+                return;
+            case CommandType.MineStop:
+                Player.StopMining();
                 return;
             default:
                 RejectedCommandCount++;

@@ -347,4 +347,67 @@ public class SimulationTests
         // walking east must never enter tile x>=1
         Assert.True(sim.Player.X >> 8 < 1, $"player X sub-tile {sim.Player.X} entered an occupied tile");
     }
+
+    private static Command MineAt(int x, int y) => new() { Type = CommandType.MineStart, X = x, Y = y };
+
+    [Fact]
+    public void HandMine_Entity_RemovesItAndYieldsItem()
+    {
+        var sim = NewSim();
+        int chestItem = sim.Prototypes.Get<ItemPrototype>("wooden-chest").Id;
+        int miningTicks = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").MiningTimeTicks;
+        sim.Submit(PlaceChest(sim, 1, 0));
+        sim.Step();
+        int before = sim.Player.Inventory.CountOf(chestItem);
+
+        for (int t = 0; t < miningTicks + 2; t++) { sim.Submit(MineAt(1, 0)); sim.Step(); }
+
+        Assert.False(sim.World.GetEntityAt(1, 0).IsValid);
+        Assert.Equal(before + 1, sim.Player.Inventory.CountOf(chestItem));
+        Assert.Equal(0, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void HandMine_Resource_ExtractsOneAndYieldsItem()
+    {
+        var sim = NewSim();
+        int coalItem = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int miningTicks = sim.Prototypes.Get<ResourcePrototype>("coal").MiningTimeTicks;
+        int itemBefore = sim.Player.Inventory.CountOf(coalItem);
+        int resBefore = sim.Resources.GetResourceAt(1, -1).Amount;
+        Assert.True(resBefore > 0);
+
+        for (int t = 0; t < miningTicks + 2; t++) { sim.Submit(MineAt(1, -1)); sim.Step(); }
+
+        Assert.Equal(itemBefore + 1, sim.Player.Inventory.CountOf(coalItem));
+        Assert.Equal(resBefore - 1, sim.Resources.GetResourceAt(1, -1).Amount);
+    }
+
+    [Fact]
+    public void HandMine_OutOfReach_MakesNoProgress()
+    {
+        var sim = NewSim();
+        int before = sim.Player.Inventory.TotalItems();
+        for (int t = 0; t < 200; t++) { sim.Submit(MineAt(6, -8)); sim.Step(); }   // ~10 tiles, reach is 6
+        Assert.Equal(0, sim.Player.MineProgress);
+        Assert.Equal(before, sim.Player.Inventory.TotalItems());
+    }
+
+    [Fact]
+    public void HandMine_Resource_InventoryFull_Pauses()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int miningTicks = sim.Prototypes.Get<ResourcePrototype>("coal").MiningTimeTicks;
+        // fill the whole player inventory with coal
+        var inv = sim.Player.Inventory;
+        inv.Insert(coal, inv.SlotCount * coalStack, coalStack);
+        int amtBefore = sim.Resources.GetResourceAt(1, -1).Amount;
+
+        for (int t = 0; t < miningTicks + 5; t++) { sim.Submit(MineAt(1, -1)); sim.Step(); }
+
+        Assert.Equal(amtBefore, sim.Resources.GetResourceAt(1, -1).Amount);   // nothing extracted
+        Assert.Equal(miningTicks, sim.Player.MineProgress);                    // parked at threshold
+    }
 }
