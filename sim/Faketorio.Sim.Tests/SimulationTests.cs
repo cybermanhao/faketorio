@@ -302,4 +302,49 @@ public class SimulationTests
         sim.Resources.GetResourceAt(6, -8);      // starter patch -> non-empty chunk
         Assert.NotEqual(before, sim.ComputeStateHash());
     }
+
+    private static Command Move(byte dir) => new() { Type = CommandType.MovePlayer, Rotation = dir };
+    private static Command StopMove() => new() { Type = CommandType.StopPlayer };
+
+    [Fact]
+    public void MovePlayer_ThenStep_AdvancesByWalkSpeed()
+    {
+        var sim = NewSim();
+        int speed = sim.Prototypes.Get<PlayerPrototype>("player").WalkSpeedSubTilesPerTick;
+        sim.Submit(Move(2));   // east = +X
+        sim.Step();
+        Assert.Equal(speed, sim.Player.X);
+        Assert.Equal(0, sim.Player.Y);
+    }
+
+    [Fact]
+    public void StopPlayer_HaltsMovement()
+    {
+        var sim = NewSim();
+        sim.Submit(Move(2)); sim.Step();
+        int x = sim.Player.X;
+        sim.Submit(StopMove()); sim.Step();
+        Assert.Equal(x, sim.Player.X);
+    }
+
+    [Fact]
+    public void MovePlayer_OutOfRangeDirection_IsRejected()
+    {
+        var sim = NewSim();
+        sim.Submit(new Command { Type = CommandType.MovePlayer, Rotation = 8 });
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(0, sim.Player.X);
+    }
+
+    [Fact]
+    public void MovePlayer_IntoOccupiedTile_IsBlocked()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 1, 0));   // tile (1,0), east of the player at sub-tile (0,0)
+        sim.Step();
+        for (int t = 0; t < 20; t++) { sim.Submit(Move(2)); sim.Step(); }
+        // walking east must never enter tile x>=1
+        Assert.True(sim.Player.X >> 8 < 1, $"player X sub-tile {sim.Player.X} entered an occupied tile");
+    }
 }

@@ -20,8 +20,10 @@ public sealed class Simulation
     // record struct(不依赖 EntityPool),拿它当键不引入对实体池的依赖。
     public Inventories Inventories { get; } = new();
     public ResourceGrid Resources { get; }
+    public Player Player { get; }
 
     private readonly long _worldSeed;
+    private readonly PlayerPrototype _playerProto;
 
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
@@ -33,6 +35,11 @@ public sealed class Simulation
         Prototypes = prototypes;
         _worldSeed = worldSeed;
         Resources = new ResourceGrid(worldSeed, prototypes);
+        if (!prototypes.TryGet<PlayerPrototype>("player", out var pp))
+            throw new InvalidOperationException("No 'player' prototype in the registry");
+        _playerProto = pp;
+        Player = new Player(pp.InventorySize);
+        // 开局物资包在 Task 5 填;这里先留空。
     }
 
     public void Submit(in Command command) => _commands.Enqueue(command);
@@ -42,6 +49,10 @@ public sealed class Simulation
         var commands = _commands.BeginTick();
         for (int i = 0; i < commands.Length; i++)
             Apply(in commands[i]);
+
+        // 玩家 tick:① 行走(碰撞) ② 挖掘(Task 3) ③ 合成(Task 4)
+        PlayerWalk();
+
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
         {
@@ -114,6 +125,16 @@ public sealed class Simulation
         Belts.WriteState(writer);
         Inventories.WriteState(writer);
         Resources.WriteState(writer);
+        Player.WriteState(writer);
+    }
+
+    private void PlayerWalk()
+    {
+        if (!Player.Walking) return;
+        var (dx, dy) = Player.WalkDelta(Player.WalkDir, _playerProto.WalkSpeedSubTilesPerTick);
+        int nx = Player.X + dx, ny = Player.Y + dy;
+        if (World.GetEntityAt(nx >> 8, ny >> 8).IsValid) return;   // 整步拒绝,不滑墙
+        Player.MoveTo(nx, ny);
     }
 
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
@@ -167,20 +188,33 @@ public sealed class Simulation
                     RejectedCommandCount++;
                     return;
                 }
-                int bx = data.X, by = data.Y;
-                bool isBelt = proto is TransportBeltPrototype;
-                bool isContainer = proto is ContainerPrototype;
-                World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
-                Entities.Destroy(id);
-                if (isBelt)
-                    Belts.RemoveBelt(bx, by);
-                if (isContainer)
-                    Inventories.RemoveContainer(id);   // M1: 返回的物品总数丢弃(策略层 P5 起再定)
+                DestroyEntityAt(id, proto);
                 return;
             }
+            case CommandType.MovePlayer:
+                if (command.Rotation > 7) { RejectedCommandCount++; return; }
+                Player.SetWalk(command.Rotation);
+                return;
+            case CommandType.StopPlayer:
+                Player.StopWalk();
+                return;
             default:
                 RejectedCommandCount++;
                 return;
         }
+    }
+
+    // 移除一个实体:清占地 + 销毁 + belt/container 后处理。命令路径(RemoveEntity)
+    // 和手挖(Task 3)共用。调用方保证 id 存活、proto 匹配。
+    private void DestroyEntityAt(EntityId id, EntityPrototype proto)
+    {
+        ref var data = ref Entities.Get(id);
+        int bx = data.X, by = data.Y;
+        bool isBelt = proto is TransportBeltPrototype;
+        bool isContainer = proto is ContainerPrototype;
+        World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
+        Entities.Destroy(id);
+        if (isBelt) Belts.RemoveBelt(bx, by);
+        if (isContainer) Inventories.RemoveContainer(id);
     }
 }
