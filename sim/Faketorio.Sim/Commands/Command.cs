@@ -4,6 +4,11 @@ public enum CommandType : byte
 {
     PlaceEntity = 1,
     RemoveEntity = 2,
+    MovePlayer = 3,
+    StopPlayer = 4,
+    MineStart = 5,
+    MineStop = 6,
+    CraftEnqueue = 7,
 }
 
 public struct Command
