@@ -1,0 +1,10 @@
+[
+  { "type": "resource", "name": "coal",       "minableResult": "coal",
+    "noise": { "thresholdQ16": 44000 }, "richnessBase": 400, "richnessScale": 6000 },
+  { "type": "resource", "name": "iron-ore",   "minableResult": "iron-ore",
+    "noise": { "thresholdQ16": 45000 }, "richnessBase": 400, "richnessScale": 6000 },
+  { "type": "resource", "name": "copper-ore", "minableResult": "copper-ore",
+    "noise": { "thresholdQ16": 45000 }, "richnessBase": 400, "richnessScale": 6000 },
+  { "type": "resource", "name": "stone",      "minableResult": "stone",
+    "noise": { "thresholdQ16": 46000 }, "richnessBase": 300, "richnessScale": 4000 }
+]

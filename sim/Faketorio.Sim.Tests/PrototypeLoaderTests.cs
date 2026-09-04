@@ -72,4 +72,96 @@ public class PrototypeLoaderTests
             "[{ \"type\": \"container\", \"name\": \"broken-chest\", \"tileWidth\": 0, \"tileHeight\": 1 }]");
         Assert.Throws<InvalidDataException>(() => PrototypeLoader.LoadFromDirectory(dir));
     }
+
+    [Fact]
+    public void LoadsResourceWithResolvedNoiseLayer()
+    {
+        var reg = Load();
+        var coal = reg.Get<ResourcePrototype>("coal");
+        Assert.Equal("coal", coal.MinableResult);
+        Assert.Equal(400, coal.RichnessBase);
+        Assert.Equal(44000, coal.Layer.ThresholdQ16);
+        Assert.Equal(64, coal.Layer.LatticeSize);     // 从 map-gen 默认补齐
+        Assert.Equal(3, coal.Layer.Octaves);          // 从 map-gen 默认补齐
+        Assert.Equal(1 + coal.Id, coal.Layer.FieldId); // fieldId 省略 -> 1 + Id
+        Assert.False(coal.Layer.Warp);
+    }
+
+    [Fact]
+    public void LoadsMapGenWithStarterPatches()
+    {
+        var mg = Load().Get<MapGenPrototype>("default");
+        Assert.Equal(4, mg.StarterPatches.Count);
+        Assert.Equal(new StarterPatch("coal", 6, -8, 4, 1500), mg.StarterPatches[0]);
+    }
+
+    private static void AssertLoadThrows(string json)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "gen.json"), json);
+        Assert.Throws<InvalidDataException>(() => PrototypeLoader.LoadFromDirectory(dir));
+    }
+
+    // 一个最小的自洽数据集:1 item + 1 map-gen + 1 resource。各负例只改坏其中一处。
+    private const string ValidItem = "{ \"type\": \"item\", \"name\": \"coal\", \"stackSize\": 50 }";
+    private const string ValidResource =
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000 }, \"richnessBase\": 400, \"richnessScale\": 6000 }";
+
+    [Fact]
+    public void TwoMapGen_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, {ValidResource}, " +
+        "{ \"type\": \"map-gen\", \"name\": \"a\" }, { \"type\": \"map-gen\", \"name\": \"b\" }]");
+
+    [Fact]
+    public void ResourcePresentButNoMapGen_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, {ValidResource}]");
+
+    [Fact]
+    public void NonPowerOfTwoLatticeSize_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000, \"latticeSize\": 48 }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void OctavesTooLargeForLattice_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000, \"latticeSize\": 64, \"octaves\": 8 }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void WarpTrue_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000, \"warp\": true }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void ThresholdOutOfRange_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 0 }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void RichnessBaseZero_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, " +
+        "{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"coal\", " +
+        "\"noise\": { \"thresholdQ16\": 44000 }, \"richnessBase\": 0, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void ResourceMinableResultMissingItem_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"resource\", \"name\": \"coal\", \"minableResult\": \"nonexistent\", " +
+        "\"noise\": { \"thresholdQ16\": 44000 }, \"richnessBase\": 400, \"richnessScale\": 6000 }, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\" }]");
+
+    [Fact]
+    public void StarterPatchUnknownResource_Throws() => AssertLoadThrows(
+        $"[{ValidItem}, {ValidResource}, " +
+        "{ \"type\": \"map-gen\", \"name\": \"default\", \"starterPatches\": " +
+        "[{ \"resource\": \"nonexistent\", \"centerX\": 0, \"centerY\": 0, \"radius\": 3, \"centerAmount\": 100 }] }]");
 }
