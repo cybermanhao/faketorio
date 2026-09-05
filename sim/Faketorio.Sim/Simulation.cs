@@ -23,6 +23,7 @@ public sealed class Simulation
     public ResourceGrid Resources { get; }
     public Player Player { get; }
     public ElectricGrid ElectricGrid { get; } = new();
+    public Machines Machines { get; } = new();
 
     private readonly long _worldSeed;
     private readonly PlayerPrototype _playerProto;
@@ -61,10 +62,12 @@ public sealed class Simulation
         PlayerMine();
         PlayerCraft();
 
-        // 电网:① 发电机登记供给 ② 结算 ③ 烧油结算
+        // 电网 + 加工:① 发电机登记供给 ② 机器登记需求 ③ 结算 ④ 发电机烧油 ⑤ 机器推进+完成
         ElectricGeneratorsRegisterSupply();
+        MachinesTickPreSettle();
         ElectricGrid.Settle();
         ElectricGeneratorsBurnFuel();
+        MachinesTickPostSettle();
 
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
@@ -140,6 +143,7 @@ public sealed class Simulation
         Resources.WriteState(writer);
         Player.WriteState(writer);
         ElectricGrid.WriteState(writer);
+        Machines.WriteState(writer);
     }
 
     private void PlayerWalk()
@@ -289,6 +293,12 @@ public sealed class Simulation
                     Inventories.AddContainer(id, 1, filterItemProtoId: gen.FuelItemProtoId);
                     ElectricGrid.RegisterGenerator(id);
                 }
+                if (proto is CraftingMachinePrototype cmp)
+                {
+                    Inventories.AddContainer(id, cmp.InputSlots, role: 1);
+                    Inventories.AddContainer(id, cmp.OutputSlots, role: 2);
+                    Machines.RegisterMachine(id);
+                }
                 return;
             }
             case CommandType.RemoveEntity:
@@ -333,7 +343,9 @@ public sealed class Simulation
                     return;
                 }
                 var eid = World.GetEntityAt(command.X, command.Y);
-                var targetInvId = eid.IsValid ? Inventories.GetInventoryId(eid) : InventoryId.Invalid;
+                int targetRole = eid.IsValid && Prototypes.TryGetById(Entities.Get(eid).ProtoId, out var targetProto)
+                    && targetProto is CraftingMachinePrototype ? 1 : 0;
+                var targetInvId = eid.IsValid ? Inventories.GetInventoryId(eid, targetRole) : InventoryId.Invalid;
                 if (!targetInvId.IsValid)
                 {
                     RejectedCommandCount++;
@@ -362,7 +374,9 @@ public sealed class Simulation
                     return;
                 }
                 var eid2 = World.GetEntityAt(command.X, command.Y);
-                var sourceInvId = eid2.IsValid ? Inventories.GetInventoryId(eid2) : InventoryId.Invalid;
+                int sourceRole = eid2.IsValid && Prototypes.TryGetById(Entities.Get(eid2).ProtoId, out var sourceProto)
+                    && sourceProto is CraftingMachinePrototype ? 2 : 0;
+                var sourceInvId = eid2.IsValid ? Inventories.GetInventoryId(eid2, sourceRole) : InventoryId.Invalid;
                 if (!sourceInvId.IsValid)
                 {
                     RejectedCommandCount++;
@@ -382,6 +396,20 @@ public sealed class Simulation
                 int removed = sourceInv.Remove(command.ProtoId, amount2);
                 int inserted2 = Player.Inventory.Insert(command.ProtoId, removed, itemProto2.StackSize);
                 System.Diagnostics.Debug.Assert(inserted2 == removed, "TransferFromEntity: amount was pre-clamped to available space, insert should never partially fail");
+                return;
+            }
+            case CommandType.SetRecipe:
+            {
+                var mid = World.GetEntityAt(command.X, command.Y);
+                if (!mid.IsValid || !Entities.IsAlive(mid)
+                    || !Prototypes.TryGetById(Entities.Get(mid).ProtoId, out var mp) || mp is not AssemblingMachinePrototype amp
+                    || !Prototypes.TryGetById(command.ProtoId, out var rp2) || rp2 is not RecipePrototype recipe2
+                    || recipe2.Category != amp.Category)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+                Machines.SetRecipe(mid, command.ProtoId);
                 return;
             }
             case CommandType.CraftEnqueue:
@@ -422,6 +450,7 @@ public sealed class Simulation
         bool isContainer = proto is ContainerPrototype;
         bool isPole = proto is ElectricPolePrototype;
         bool isGenerator = proto is FuelGeneratorPrototype;
+        bool isMachine = proto is CraftingMachinePrototype;
         World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
         Entities.Destroy(id);
         if (isBelt) Belts.RemoveBelt(bx, by);
@@ -431,6 +460,12 @@ public sealed class Simulation
         {
             Inventories.RemoveContainer(id);
             ElectricGrid.UnregisterGenerator(id);
+        }
+        if (isMachine)
+        {
+            Inventories.RemoveContainer(id, role: 1);
+            Inventories.RemoveContainer(id, role: 2);
+            Machines.UnregisterMachine(id);
         }
     }
 
@@ -470,6 +505,119 @@ public sealed class Simulation
             }
             long delivered = Math.Min(actual, buf);
             ElectricGrid.SetFuelBufferJ(id, buf - delivered);
+        }
+    }
+
+    // 加工:配方选定 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟——全部机器
+    // 先登记完需求,ElectricGrid.Settle() 才能看到本 tick 完整的需求总量。
+    private void MachinesTickPreSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not CraftingMachinePrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            MachineTickPreSettle(id, proto, data.X, data.Y);
+        }
+    }
+
+    private void MachineTickPreSettle(EntityId id, CraftingMachinePrototype proto, int x, int y)
+    {
+        // 第 1 步:flush 已完成的产出
+        if (Machines.IsCompleted(id))
+        {
+            var doneRecipe = (RecipePrototype)Prototypes.GetById(Machines.GetCurrentRecipe(id));
+            var outputInv = Inventories.Get(Inventories.GetInventoryId(id, 2));
+            bool fits = true;
+            foreach (var res in doneRecipe.ResolvedResults)
+            {
+                int stack = ((ItemPrototype)Prototypes.GetById(res.ItemProtoId)).StackSize;
+                if (!outputInv.CanInsert(res.ItemProtoId, res.Amount, stack)) { fits = false; break; }
+            }
+            if (fits)
+            {
+                foreach (var res in doneRecipe.ResolvedResults)
+                {
+                    int stack = ((ItemPrototype)Prototypes.GetById(res.ItemProtoId)).StackSize;
+                    outputInv.Insert(res.ItemProtoId, res.Amount, stack);
+                }
+                Machines.RestartCycle(id, clearRecipe: proto is FurnacePrototype);
+                // 本 tick 继续走到第 2 步(不用等下一 tick),fits==true 时不 return。
+            }
+            else
+            {
+                // 输出堵塞:跳过第 2 步(不重新匹配/不能开始新一轮),但仍登记待机能耗。
+                ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+                return;
+            }
+        }
+
+        // 第 2 步:配方选定(仅当当前没有配方)
+        if (Machines.GetCurrentRecipe(id) == -1 && proto is FurnacePrototype)
+        {
+            var inputInv = Inventories.Get(Inventories.GetInventoryId(id, 1));
+            for (int rid = 0; rid < Prototypes.Count; rid++)
+            {
+                if (Prototypes.GetById(rid) is not RecipePrototype recipe || recipe.Category != proto.Category) continue;
+                bool satisfied = true;
+                foreach (var ing in recipe.ResolvedIngredients)
+                    if (inputInv.CountOf(ing.ItemProtoId) < ing.Amount) { satisfied = false; break; }
+                if (satisfied) { Machines.SetRecipe(id, recipe.Id); break; }
+            }
+        }
+        // 装配机:不自动匹配,只用玩家此前 SetRecipe 设置的结果(可能仍是 -1)。
+
+        // 第 3 步:电力需求登记(无条件——恒定待机能耗)
+        ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+    }
+
+    // 加工:进度推进 + 完成校验(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
+    private void MachinesTickPostSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not CraftingMachinePrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            MachineTickPostSettle(id, proto);
+        }
+    }
+
+    private void MachineTickPostSettle(EntityId id, CraftingMachinePrototype proto)
+    {
+        int recipeId = Machines.GetCurrentRecipe(id);
+        if (recipeId == -1 || Machines.IsCompleted(id)) return;   // 空转,或本 tick 刚 flush 失败仍在等
+
+        var recipe = (RecipePrototype)Prototypes.GetById(recipeId);
+        var inputInv = Inventories.Get(Inventories.GetInventoryId(id, 1));
+
+        bool satisfied = true;
+        foreach (var ing in recipe.ResolvedIngredients)
+            if (inputInv.CountOf(ing.ItemProtoId) < ing.Amount) { satisfied = false; break; }
+        if (!satisfied) return;   // 缺料:本 tick 冻结进度,不清零、不重置配方,等原料备齐
+
+        long threshold = (long)recipe.EnergyRequiredTicks << 16;
+        var satisfaction = ElectricGrid.GetSatisfaction(id);
+        long delta = proto.CraftingSpeed.Mul(satisfaction.Raw);
+        if (Machines.GetProgress(id) < threshold) Machines.AddProgress(id, delta);
+        if (Machines.GetProgress(id) < threshold) return;   // 阻塞在阈值,不再累加
+
+        // 完成前重校验(单线程 tick 内必然通过,是给未来机械臂/传送带的防御)+ 消耗原料
+        bool stillSatisfied = true;
+        foreach (var ing in recipe.ResolvedIngredients)
+            if (inputInv.CountOf(ing.ItemProtoId) < ing.Amount) { stillSatisfied = false; break; }
+
+        if (stillSatisfied)
+        {
+            foreach (var ing in recipe.ResolvedIngredients)
+                inputInv.Remove(ing.ItemProtoId, ing.Amount);
+            Machines.MarkCompleted(id);
+        }
+        else
+        {
+            Machines.RestartCycle(id, clearRecipe: proto is FurnacePrototype);
         }
     }
 }
