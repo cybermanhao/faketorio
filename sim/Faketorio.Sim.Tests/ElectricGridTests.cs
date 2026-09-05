@@ -207,4 +207,29 @@ public class ElectricGridTests
         grid.Settle();   // 没有新登记就结算 -> 上一轮的结果不应该继续生效
         Assert.Equal(Q16.Zero, grid.GetSatisfaction(consumer));
     }
+
+    [Fact]
+    public void ThreeProducersUnevenShare_AllocationsSumExactlyToUsed()
+    {
+        // 回归测试:3 个 Amount=1 的生产者同一档,tierCapacity=3,demand 只要 2 (used=2)。
+        // 若每个生产者独立算 e.Amount * used / tierCapacity = 1*2/3 = 0(向下取整),
+        // Σ allocated 会变成 0 而不是 2——凭空"丢电",与 shortfall/satisfaction 记账的
+        // used=2 对不上。正确实现必须保证 Σ GetAllocatedSupply == used。
+        var grid = GridWithOnePole();
+        var p1 = new EntityId(1, 1); var p2 = new EntityId(2, 1); var p3 = new EntityId(3, 1);
+        var consumer = new EntityId(4, 1);
+
+        grid.RegisterSupply(p1, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1);
+        grid.RegisterSupply(p2, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1);
+        grid.RegisterSupply(p3, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 2);
+        grid.Settle();
+
+        long sum = grid.GetAllocatedSupply(p1) + grid.GetAllocatedSupply(p2) + grid.GetAllocatedSupply(p3);
+        Assert.Equal(2, sum);
+        // 每个生产者不能超过自己声明的产能上限
+        Assert.InRange(grid.GetAllocatedSupply(p1), 0, 1);
+        Assert.InRange(grid.GetAllocatedSupply(p2), 0, 1);
+        Assert.InRange(grid.GetAllocatedSupply(p3), 0, 1);
+    }
 }

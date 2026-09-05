@@ -147,12 +147,39 @@ public sealed class ElectricGrid
             long used = Math.Min(tierCapacity, remaining);
             if (tierCapacity > 0)
             {
-                // 直接整数按比例分配(e.Amount * used / tierCapacity),不经过 Q16 中间量——
-                // Q16.FromRatio(used, tierCapacity).Mul(e.Amount) 两次截断会在整除的情况下
-                // 也丢 1(例如 400/1000 份额分配给 amount=1000 的单一生产者,理论上应精确得
-                // 400,但两次 Q16 截断算出 399)。这里单次整除,exact 场景下不丢精度。
-                foreach (var e in tierEntries)
-                    _allocatedSupply[e.Id] = e.Amount * used / tierCapacity;
+                // 按 e.Amount * used / tierCapacity 独立算每个生产者的份额,不保证 Σ == used
+                // (例如 3 个 Amount=1 的生产者、used=2、capacity=3:每个独立算 1*2/3=0,
+                // Σ=0 != used=2,凭空"丢电"——下游 shortfall/satisfaction 已经按 used 记账,
+                // 会跟 GetAllocatedSupply 的实际读数对不上)。
+                //
+                // 用最大余数法(Hamilton apportionment)分配:先各自向下取整,
+                // 再把 used 减去各 floor 之和剩下的 leftover 个单位,按"取整时丢掉的余数"
+                // 从大到小(平局按 EntityId.Index 升序,保证确定性)逐个 +1 分给对应生产者。
+                // 这样 Σ allocated 精确等于 used;并且由于 used <= tierCapacity,每个
+                // floor(e.Amount*used/tierCapacity) 严格 < e.Amount(当 used < tierCapacity 时),
+                // 所以 +1 之后仍然 <= e.Amount,不会有生产者被分到超过自己声明产能的份额
+                // ——直接把"最后一个吃全部余数"会破坏这个上限(3 个 Amount=1,used=2 时,
+                // 前两个 floor 都是 0,最后一个会被塞进整个 2,超过它自己的产能 1)。
+                var shares = new long[tierEntries.Count];
+                var remainders = new long[tierEntries.Count];
+                long sumFloor = 0;
+                for (int i = 0; i < tierEntries.Count; i++)
+                {
+                    var e = tierEntries[i];
+                    shares[i] = e.Amount * used / tierCapacity;
+                    remainders[i] = e.Amount * used % tierCapacity;
+                    sumFloor += shares[i];
+                }
+                long leftover = used - sumFloor;
+                var order = new List<int>();
+                for (int i = 0; i < tierEntries.Count; i++) order.Add(i);
+                order.Sort((a, b) =>
+                {
+                    int cmp = remainders[b].CompareTo(remainders[a]);   // 余数大的优先
+                    return cmp != 0 ? cmp : tierEntries[a].Id.Index.CompareTo(tierEntries[b].Id.Index);
+                });
+                for (int k = 0; k < leftover; k++) shares[order[k]] += 1;
+                for (int i = 0; i < tierEntries.Count; i++) _allocatedSupply[tierEntries[i].Id] = shares[i];
             }
             remaining -= used;
         }
