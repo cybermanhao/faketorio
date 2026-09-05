@@ -290,4 +290,17 @@ public class PrototypeLoaderTests
     [Fact]
     public void CraftingMachineNegativeEnergyUsage_Throws() => AssertLoadThrows(
         "[{ \"type\": \"furnace\", \"name\": \"f\", \"category\": \"smelting\", \"inputSlots\": 1, \"outputSlots\": 1, \"energyUsage\": \"-120W\" }]");
+
+    [Fact]
+    public void LoadsMiningDrill()
+    {
+        var drill = Load().Get<MiningDrillPrototype>("electric-mining-drill");
+        Assert.Equal(2, drill.TileWidth);
+        Assert.Equal(2, drill.TileHeight);
+        Assert.Equal(1500, drill.EnergyUsageJPerTick);   // 90kW / 60 ticks-per-second
+    }
+
+    [Fact]
+    public void MiningDrillNegativeEnergyUsage_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"mining-drill\", \"name\": \"d\", \"energyUsage\": \"-120W\" }]");
 }

@@ -1,10 +1,16 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.State;
+using System.Linq;
 
 namespace Faketorio.Sim.Tests;
 
 public class BeltLaneTests
 {
+    private const int TestItem = 1;   // 位置/间距测试不关心具体是什么物品,固定用一个 id
+
+    private static IReadOnlyList<BeltLane.PositionedItem> Positions(params int[] leadingEdges)
+        => Array.ConvertAll(leadingEdges, p => new BeltLane.PositionedItem(p, TestItem));
+
     [Fact]
     public void NewLane_IsEmpty()
     {
@@ -22,7 +28,7 @@ public class BeltLaneTests
     public void TryInsertAtBack_FirstItem_EntersAtBackWithFullGapToExit()
     {
         var lane = new BeltLane(256);
-        Assert.True(lane.TryInsertAtBack());
+        Assert.True(lane.TryInsertAtBack(TestItem));
         Assert.Equal(1, lane.Count);
         Assert.Equal(new[] { 192 }, lane.Gaps); // 256 - 64
     }
@@ -31,8 +37,8 @@ public class BeltLaneTests
     public void TryInsertAtBack_WhenNoRoom_ReturnsFalseAndDoesNotChangeState()
     {
         var lane = new BeltLane(256);
-        Assert.True(lane.TryInsertAtBack());  // 单个物品刚好占满整条 256 长的 line
-        Assert.False(lane.TryInsertAtBack()); // 队尾无空间
+        Assert.True(lane.TryInsertAtBack(TestItem));  // 单个物品刚好占满整条 256 长的 line
+        Assert.False(lane.TryInsertAtBack(TestItem)); // 队尾无空间
         Assert.Equal(1, lane.Count);
         Assert.Equal(new[] { 192 }, lane.Gaps);
     }
@@ -41,7 +47,7 @@ public class BeltLaneTests
     public void Advance_UnblockedSingleItem_MovesFrontGapForward()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); // gaps=[192]
+        lane.TryInsertAtBack(TestItem); // gaps=[192]
         lane.Advance(50);
         Assert.Equal(new[] { 142 }, lane.Gaps);
     }
@@ -50,7 +56,7 @@ public class BeltLaneTests
     public void Advance_NeverDrivesGapNegative_ClampsAtZero()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); // gaps=[192]
+        lane.TryInsertAtBack(TestItem); // gaps=[192]
         lane.Advance(1000);      // 远超剩余 gap
         Assert.Equal(new[] { 0 }, lane.Gaps);
     }
@@ -59,9 +65,9 @@ public class BeltLaneTests
     public void Advance_CascadesIntoNextGapWhenFrontFullyCloses()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();  // gaps=[192]
+        lane.TryInsertAtBack(TestItem);  // gaps=[192]
         lane.Advance(100);        // gaps=[92]
-        lane.TryInsertAtBack();  // free=256-(92+64+64)=36 -> gaps=[92,36]
+        lane.TryInsertAtBack(TestItem);  // free=256-(92+64+64)=36 -> gaps=[92,36]
         lane.Advance(110);        // 92 耗尽 gaps[0],剩余 18 接着消耗 gaps[1]
         Assert.Equal(new[] { 0, 18 }, lane.Gaps);
     }
@@ -70,9 +76,9 @@ public class BeltLaneTests
     public void Advance_ContinuesFromCachedOpenIndexAfterFrontCloses()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(100);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(110); // gaps=[0,18]
         lane.Advance(5);    // 从缓存的下标(不是 0)继续推进
         Assert.Equal(new[] { 0, 13 }, lane.Gaps);
@@ -90,7 +96,7 @@ public class BeltLaneTests
     public void Advance_WithZeroSpeed_DoesNotChangeGaps()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(0);
         Assert.Equal(new[] { 192 }, lane.Gaps);
     }
@@ -103,11 +109,11 @@ public class BeltLaneTests
         // 为下一次插入腾出队尾空间。
         for (int i = 0; i < 4; i++)
         {
-            Assert.True(lane.TryInsertAtBack());
+            Assert.True(lane.TryInsertAtBack(TestItem));
             lane.Advance(1000);
         }
         Assert.Equal(4, lane.Count);
-        Assert.False(lane.TryInsertAtBack()); // 4*64=256,队尾无空间
+        Assert.False(lane.TryInsertAtBack(TestItem)); // 4*64=256,队尾无空间
 
         // 此后一直堵塞(没有任何 RemoveFront):重复 Advance 必须保持稳定,
         // 不抛异常、不出现负值、不改变物品数。
@@ -126,7 +132,7 @@ public class BeltLaneTests
         // 装满 4 个物品(256/64),让它们尽量往前推,形成完全堵塞状态。
         for (int i = 0; i < 4; i++)
         {
-            lane.TryInsertAtBack();
+            lane.TryInsertAtBack(TestItem);
             lane.Advance(1000);
         }
         Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
@@ -144,7 +150,7 @@ public class BeltLaneTests
     public void Advance_WithNegativeSpeed_Throws()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         Assert.Throws<ArgumentOutOfRangeException>(() => lane.Advance(-1));
     }
 
@@ -152,9 +158,9 @@ public class BeltLaneTests
     public void Advance_UnblockedMultiItem_OnlyMovesFrontGap()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();  // gaps=[192]
+        lane.TryInsertAtBack(TestItem);  // gaps=[192]
         lane.Advance(100);        // gaps=[92]
-        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.TryInsertAtBack(TestItem);  // gaps=[92,36]
         lane.Advance(10);         // 前方 gap 未压缩到 0,不应级联touch第二个 gap
         Assert.Equal(new[] { 82, 36 }, lane.Gaps);
     }
@@ -170,7 +176,7 @@ public class BeltLaneTests
     public void IsFrontReady_FalseWhenFrontGapNotYetZero()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); // gaps=[192]
+        lane.TryInsertAtBack(TestItem); // gaps=[192]
         Assert.False(lane.IsFrontReady);
     }
 
@@ -178,7 +184,7 @@ public class BeltLaneTests
     public void IsFrontReady_TrueWhenFrontGapReachesZero()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(1000);
         Assert.True(lane.IsFrontReady);
     }
@@ -187,7 +193,7 @@ public class BeltLaneTests
     public void RemoveFront_WhenNotReady_Throws()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); // gaps=[192],队首还没到出口
+        lane.TryInsertAtBack(TestItem); // gaps=[192],队首还没到出口
         Assert.Throws<InvalidOperationException>(() => lane.RemoveFront());
     }
 
@@ -195,9 +201,9 @@ public class BeltLaneTests
     public void RemoveFront_FreesSpaceIntoNewFrontGap()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();  // gaps=[192]
+        lane.TryInsertAtBack(TestItem);  // gaps=[192]
         lane.Advance(100);        // gaps=[92]
-        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.TryInsertAtBack(TestItem);  // gaps=[92,36]
         lane.Advance(110);        // gaps=[0,18]
         lane.RemoveFront();
         Assert.Equal(1, lane.Count);
@@ -208,7 +214,7 @@ public class BeltLaneTests
     public void RemoveFront_WhenLastItem_LeavesLaneEmpty()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(1000);
         lane.RemoveFront();
         Assert.Equal(0, lane.Count);
@@ -219,9 +225,9 @@ public class BeltLaneTests
     public void RemoveFront_ResetsCursorSoTrailingItemsCanAdvanceOnNextTick()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();  // gaps=[192]
+        lane.TryInsertAtBack(TestItem);  // gaps=[192]
         lane.Advance(100);        // gaps=[92]
-        lane.TryInsertAtBack();  // gaps=[92,36]
+        lane.TryInsertAtBack(TestItem);  // gaps=[92,36]
         lane.Advance(110);        // gaps=[0,18]
         lane.RemoveFront();       // gaps=[82]
         lane.Advance(30);         // 原来的第二个物品现在向出口前进
@@ -232,13 +238,13 @@ public class BeltLaneTests
     public void ExtendBack_GrowsBackCapacityWithoutMovingItems()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();               // gaps=[192],队尾已满
-        Assert.False(lane.TryInsertAtBack()); // 延长前没有空间
+        lane.TryInsertAtBack(TestItem);               // gaps=[192],队尾已满
+        Assert.False(lane.TryInsertAtBack(TestItem)); // 延长前没有空间
 
         lane.ExtendBack(256);                 // line 现在长 512
 
         Assert.Equal(new[] { 192 }, lane.Gaps);       // 最前物品没有移动
-        Assert.True(lane.TryInsertAtBack());           // 队尾腾出了空间
+        Assert.True(lane.TryInsertAtBack(TestItem));           // 队尾腾出了空间
         Assert.Equal(new[] { 192, 192 }, lane.Gaps);  // 512 - (192+64) - 64 = 192
     }
 
@@ -253,7 +259,7 @@ public class BeltLaneTests
     public void ExtendFront_PushesExitOutwardAndEnlargesFrontGap()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack();   // gaps=[192]
+        lane.TryInsertAtBack(TestItem);   // gaps=[192]
         lane.ExtendFront(256);    // 出口离物品又远了 256
         Assert.Equal(new[] { 448 }, lane.Gaps);
     }
@@ -264,7 +270,7 @@ public class BeltLaneTests
         var lane = new BeltLane(256);
         lane.ExtendFront(256);
         Assert.Equal(0, lane.Count);
-        Assert.True(lane.TryInsertAtBack());       // 现在长 512
+        Assert.True(lane.TryInsertAtBack(TestItem));       // 现在长 512
         Assert.Equal(new[] { 448 }, lane.Gaps);   // 512 - 64
     }
 
@@ -273,7 +279,7 @@ public class BeltLaneTests
     {
         var lane = new BeltLane(256);
         // 装满并完全压缩:gaps=[0,0,0,0],内部游标停在末尾
-        for (int i = 0; i < 4; i++) { lane.TryInsertAtBack(); lane.Advance(1000); }
+        for (int i = 0; i < 4; i++) { lane.TryInsertAtBack(TestItem); lane.Advance(1000); }
         Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
 
         lane.ExtendFront(64);   // gaps=[64,0,0,0]
@@ -300,26 +306,26 @@ public class BeltLaneTests
     public void ToAbsolutePositions_ReturnsLeadingEdgeDistancesFromExit()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); // gaps=[192]
+        lane.TryInsertAtBack(TestItem); // gaps=[192]
         lane.Advance(100);       // gaps=[92]
-        lane.TryInsertAtBack(); // gaps=[92,36]
-        Assert.Equal(new[] { 92, 192 }, lane.ToAbsolutePositions()); // 92, 92+64+36
+        lane.TryInsertAtBack(TestItem); // gaps=[92,36]
+        Assert.Equal(new[] { 92, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 92, 92+64+36
     }
 
     [Fact]
     public void ToAbsolutePositions_TouchingItems_AreOneWidthApart()
     {
         var lane = new BeltLane(256);
-        for (int i = 0; i < 2; i++) { lane.TryInsertAtBack(); lane.Advance(1000); }
-        Assert.Equal(new[] { 0, 64 }, lane.ToAbsolutePositions());
+        for (int i = 0; i < 2; i++) { lane.TryInsertAtBack(TestItem); lane.Advance(1000); }
+        Assert.Equal(new[] { 0, 64 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
     }
 
     [Fact]
     public void FromAbsolutePositions_RoundTripsWithToAbsolutePositions()
     {
         var lane = new BeltLane(256);
-        lane.TryInsertAtBack(); lane.Advance(100);
-        lane.TryInsertAtBack();                 // gaps=[92,36]
+        lane.TryInsertAtBack(TestItem); lane.Advance(100);
+        lane.TryInsertAtBack(TestItem);                 // gaps=[92,36]
         var rebuilt = BeltLane.FromAbsolutePositions(256, lane.ToAbsolutePositions());
         Assert.Equal(new[] { 92, 36 }, rebuilt.Gaps);
         Assert.Equal(2, rebuilt.Count);
@@ -328,9 +334,9 @@ public class BeltLaneTests
     [Fact]
     public void FromAbsolutePositions_EmptyList_GivesEmptyLaneOfGivenLength()
     {
-        var lane = BeltLane.FromAbsolutePositions(512, Array.Empty<int>());
+        var lane = BeltLane.FromAbsolutePositions(512, Positions());
         Assert.Equal(0, lane.Count);
-        Assert.True(lane.TryInsertAtBack());
+        Assert.True(lane.TryInsertAtBack(TestItem));
         Assert.Equal(new[] { 448 }, lane.Gaps); // 512 - 64
     }
 
@@ -338,27 +344,27 @@ public class BeltLaneTests
     public void FromAbsolutePositions_OverlappingItems_Throws()
     {
         Assert.Throws<ArgumentException>(
-            () => BeltLane.FromAbsolutePositions(256, new[] { 10, 50 })); // 50-10 < 64
+            () => BeltLane.FromAbsolutePositions(256, Positions(10, 50))); // 50-10 < 64
     }
 
     [Fact]
     public void FromAbsolutePositions_ItemPastExit_Throws()
     {
         Assert.Throws<ArgumentException>(
-            () => BeltLane.FromAbsolutePositions(256, new[] { -1 }));
+            () => BeltLane.FromAbsolutePositions(256, Positions(-1)));
     }
 
     [Fact]
     public void FromAbsolutePositions_ItemOverrunsLineEnd_Throws()
     {
         Assert.Throws<ArgumentException>(
-            () => BeltLane.FromAbsolutePositions(256, new[] { 200 })); // 200+64 > 256
+            () => BeltLane.FromAbsolutePositions(256, Positions(200))); // 200+64 > 256
     }
 
     [Fact]
     public void FromAbsolutePositions_CursorStartsAtZero_BlockedLaneStillConverges()
     {
-        var lane = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 });
+        var lane = BeltLane.FromAbsolutePositions(256, Positions(0, 64, 128, 192));
         Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
         lane.Advance(7); // 不抛、不产生负值
         Assert.Equal(new[] { 0, 0, 0, 0 }, lane.Gaps);
@@ -378,7 +384,7 @@ public class BeltLaneTests
         var lane = MakeThreeItemLane();
         Assert.True(lane.TryRemoveItemInRange(100, 110)); // 命中中间物品(前沿 104)
         Assert.Equal(new[] { 20, 108 }, lane.Gaps);        // 24 + 20 + 64
-        Assert.Equal(new[] { 20, 192 }, lane.ToAbsolutePositions()); // 幸存物品没有移动
+        Assert.Equal(new[] { 20, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 幸存物品没有移动
     }
 
     [Fact]
@@ -401,9 +407,9 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_MatchesRemoveFront_InTheFrontZeroGapCase()
     {
         var a = new BeltLane(256);
-        a.TryInsertAtBack(); a.Advance(100); a.TryInsertAtBack(); a.Advance(110); // gaps=[0,18]
+        a.TryInsertAtBack(TestItem); a.Advance(100); a.TryInsertAtBack(TestItem); a.Advance(110); // gaps=[0,18]
         var b = new BeltLane(256);
-        b.TryInsertAtBack(); b.Advance(100); b.TryInsertAtBack(); b.Advance(110); // gaps=[0,18]
+        b.TryInsertAtBack(TestItem); b.Advance(100); b.TryInsertAtBack(TestItem); b.Advance(110); // gaps=[0,18]
 
         a.RemoveFront();
         Assert.True(b.TryRemoveItemInRange(0, 1));
@@ -414,7 +420,7 @@ public class BeltLaneTests
     [Fact]
     public void TryRemoveItemInRange_PullsCursorBackSoTrailingItemsAdvance()
     {
-        var lane = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 }); // gaps=[0,0,0,0]
+        var lane = BeltLane.FromAbsolutePositions(256, Positions(0, 64, 128, 192)); // gaps=[0,0,0,0]
         lane.Advance(1000); // 游标推到末尾,gaps 仍是 [0,0,0,0]
 
         Assert.True(lane.TryRemoveItemInRange(64, 65)); // 摘掉下标 1(前沿 64)
@@ -431,17 +437,17 @@ public class BeltLaneTests
         Assert.True(lane.TryRemoveItemInRange(0, 150)); // 范围包含前沿 20 和 104 的两个物品
         Assert.Equal(new[] { 104, 24 }, lane.Gaps);    // 20 + 20 + 64 = 104
         Assert.Equal(2, lane.Count);
-        Assert.Equal(new[] { 104, 192 }, lane.ToAbsolutePositions()); // 幸存物品位置不变
+        Assert.Equal(new[] { 104, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 幸存物品位置不变
     }
 
     [Fact]
     public void WriteState_SameGaps_SameHash_RegardlessOfInternalCursor()
     {
         var blocked = new BeltLane(256);
-        for (int i = 0; i < 4; i++) { blocked.TryInsertAtBack(); blocked.Advance(1000); }
+        for (int i = 0; i < 4; i++) { blocked.TryInsertAtBack(TestItem); blocked.Advance(1000); }
         // blocked.Gaps == [0,0,0,0],内部游标停在末尾
 
-        var rebuilt = BeltLane.FromAbsolutePositions(256, new[] { 0, 64, 128, 192 });
+        var rebuilt = BeltLane.FromAbsolutePositions(256, Positions(0, 64, 128, 192));
         // rebuilt.Gaps == [0,0,0,0],游标在 0
 
         Assert.Equal(Hash(blocked), Hash(rebuilt));
@@ -451,9 +457,9 @@ public class BeltLaneTests
     public void WriteState_DifferentGaps_DifferentHash()
     {
         var a = new BeltLane(256);
-        a.TryInsertAtBack();                 // gaps=[192]
+        a.TryInsertAtBack(TestItem);                 // gaps=[192]
         var b = new BeltLane(256);
-        b.TryInsertAtBack(); b.Advance(50);  // gaps=[142]
+        b.TryInsertAtBack(TestItem); b.Advance(50);  // gaps=[142]
         Assert.NotEqual(Hash(a), Hash(b));
     }
 
@@ -467,7 +473,7 @@ public class BeltLaneTests
     private static BeltLane MakeThreeItemLane()
     {
         // len 256,三个 64 宽物品,gap 20/20/24(和 64 + 物品体 192 = 256)
-        return BeltLane.FromAbsolutePositions(256, new[] { 20, 104, 192 });
+        return BeltLane.FromAbsolutePositions(256, Positions(20, 104, 192));
     }
 
     private static ulong Hash(BeltLane lane)
@@ -481,18 +487,18 @@ public class BeltLaneTests
     public void ShrinkBack_TightensBackCapacity_WithoutMovingItems()
     {
         var lane = new BeltLane(512);
-        lane.TryInsertAtBack();   // gaps=[448]
+        lane.TryInsertAtBack(TestItem);   // gaps=[448]
         lane.Advance(300);         // gaps=[148],物品前沿 148、尾沿 212,队尾空 300
         lane.ShrinkBack(256);      // 512 -> 256:物品仍在 [148,212],放得下
         Assert.Equal(new[] { 148 }, lane.Gaps);
-        Assert.False(lane.TryInsertAtBack()); // 现在队尾只剩 256-(148+64)=44,插不下
+        Assert.False(lane.TryInsertAtBack(TestItem)); // 现在队尾只剩 256-(148+64)=44,插不下
     }
 
     [Fact]
     public void ShrinkBack_WouldStrandEntryItem_Throws()
     {
         var lane = new BeltLane(512);
-        lane.TryInsertAtBack();   // gaps=[448],物品尾沿贴在 512 入口,队尾空 0
+        lane.TryInsertAtBack(TestItem);   // gaps=[448],物品尾沿贴在 512 入口,队尾空 0
         Assert.Throws<InvalidOperationException>(() => lane.ShrinkBack(256));
     }
 
@@ -513,17 +519,17 @@ public class BeltLaneTests
     public void ShrinkFront_MovesExitInward_TowardItems()
     {
         var lane = new BeltLane(512);
-        lane.TryInsertAtBack();   // gaps=[448]
+        lane.TryInsertAtBack(TestItem);   // gaps=[448]
         lane.ShrinkFront(256);     // 出口内移 256:gaps[0] 448-256=192,长度 256
         Assert.Equal(new[] { 192 }, lane.Gaps);
-        Assert.Equal(new[] { 192 }, lane.ToAbsolutePositions());
+        Assert.Equal(new[] { 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
     }
 
     [Fact]
     public void ShrinkFront_WouldStrandFrontItem_Throws()
     {
         var lane = new BeltLane(512);
-        lane.TryInsertAtBack();
+        lane.TryInsertAtBack(TestItem);
         lane.Advance(400);         // gaps=[48]
         Assert.Throws<InvalidOperationException>(() => lane.ShrinkFront(256)); // gaps[0]=48 < 256
     }
@@ -534,7 +540,7 @@ public class BeltLaneTests
         var lane = new BeltLane(512);
         lane.ShrinkFront(256);
         Assert.Equal(0, lane.Count);
-        Assert.True(lane.TryInsertAtBack());
+        Assert.True(lane.TryInsertAtBack(TestItem));
         Assert.Equal(new[] { 192 }, lane.Gaps); // 256 - 64
     }
 
@@ -542,5 +548,50 @@ public class BeltLaneTests
     public void ShrinkFront_Negative_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new BeltLane(256).ShrinkFront(-1));
+    }
+
+    [Fact]
+    public void TryInsertAtBack_DifferentItems_FrontItemProtoIdTracksEachInTurn()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(10);
+        lane.Advance(1000); // 推到出口
+        Assert.True(lane.IsFrontReady);
+        Assert.Equal(10, lane.FrontItemProtoId);
+
+        lane.TryInsertAtBack(20); // 排在后面
+        Assert.Equal(10, lane.FrontItemProtoId); // 队首还是第一个
+
+        lane.RemoveFront();
+        lane.Advance(1000);
+        Assert.Equal(20, lane.FrontItemProtoId); // 现在轮到第二个
+    }
+
+    [Fact]
+    public void ToAbsolutePositions_PreservesItemTypesInOrder()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(10);
+        lane.Advance(100);
+        lane.TryInsertAtBack(20);
+
+        var positions = lane.ToAbsolutePositions();
+        Assert.Equal(2, positions.Count);
+        Assert.Equal(10, positions[0].ItemProtoId);
+        Assert.Equal(20, positions[1].ItemProtoId);
+    }
+
+    [Fact]
+    public void FromAbsolutePositions_RoundTripsItemTypes()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(10);
+        lane.Advance(100);
+        lane.TryInsertAtBack(20);
+
+        var rebuilt = BeltLane.FromAbsolutePositions(256, lane.ToAbsolutePositions());
+        var positions = rebuilt.ToAbsolutePositions();
+        Assert.Equal(10, positions[0].ItemProtoId);
+        Assert.Equal(20, positions[1].ItemProtoId);
     }
 }

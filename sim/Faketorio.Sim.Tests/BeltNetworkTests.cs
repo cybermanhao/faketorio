@@ -1,11 +1,13 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.State;
+using System.Linq;
 
 namespace Faketorio.Sim.Tests;
 
 public class BeltNetworkTests
 {
     private const byte N = 0, E = 1, S = 2, W = 3;
+    private const int TestItem = 1;
 
     private static ulong Hash(BeltNetwork net)
     {
@@ -42,8 +44,8 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         var line = net.GetLine(net.AddBelt(0, 0, E));
-        Assert.True(line.LaneA.TryInsertAtBack());
-        Assert.True(line.LaneB.TryInsertAtBack());
+        Assert.True(line.LaneA.TryInsertAtBack(TestItem));
+        Assert.True(line.LaneB.TryInsertAtBack(TestItem));
         Assert.Equal(new[] { 192 }, line.LaneA.Gaps); // 256 - 64
     }
 
@@ -148,10 +150,10 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         var id = net.AddBelt(5, 3, E);
-        net.GetLine(id).LaneA.TryInsertAtBack();          // LaneA gaps = [192]
+        net.GetLine(id).LaneA.TryInsertAtBack(TestItem);          // LaneA gaps = [192]
         net.AddBelt(4, 3, E);                              // ExtendBack:不动物品
         Assert.Equal(new[] { 192 }, net.GetLine(id).LaneA.Gaps);
-        Assert.Equal(new[] { 192 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 192 }, net.GetLine(id).LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
         Assert.Equal(512, net.GetLine(id).LengthSubTiles);
     }
 
@@ -160,10 +162,10 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         var id = net.AddBelt(5, 3, E);
-        net.GetLine(id).LaneA.TryInsertAtBack();          // gaps = [192]
+        net.GetLine(id).LaneA.TryInsertAtBack(TestItem);          // gaps = [192]
         net.AddBelt(6, 3, E);                              // ExtendFront:gaps[0] += 256
         Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.Gaps);
-        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
     }
 
     [Fact]
@@ -219,15 +221,15 @@ public class BeltNetworkTests
         var (_, upId)   = EastLineOn(net, (3, 3), (2, 3), (1, 3));    // 3 格,长 768
 
         // L_down.LaneA: 一个物品 -> gaps [448], abs [448]
-        net.GetLine(downId).LaneA.TryInsertAtBack();
+        net.GetLine(downId).LaneA.TryInsertAtBack(TestItem);
         // L_up.LaneA: 插入 -> [704],Advance(200) -> [504],再插入 -> gaps [504,136], abs [504,704]
-        net.GetLine(upId).LaneA.TryInsertAtBack();
+        net.GetLine(upId).LaneA.TryInsertAtBack(TestItem);
         net.GetLine(upId).LaneA.Advance(200);
-        net.GetLine(upId).LaneA.TryInsertAtBack();
+        net.GetLine(upId).LaneA.TryInsertAtBack(TestItem);
         // L_down.LaneB: 一个物品 -> abs [448]
-        net.GetLine(downId).LaneB.TryInsertAtBack();
+        net.GetLine(downId).LaneB.TryInsertAtBack(TestItem);
         // L_up.LaneB: 一个物品 -> gaps [704], abs [704]
-        net.GetLine(upId).LaneB.TryInsertAtBack();
+        net.GetLine(upId).LaneB.TryInsertAtBack(TestItem);
 
         var id = net.AddBelt(4, 3, E);                                // 三路合并
         var merged = net.GetLine(id);
@@ -237,12 +239,33 @@ public class BeltNetworkTests
         Assert.Equal(1536, merged.LengthSubTiles);
 
         // LaneA: down 448 原样;up 504->1272, 704->1472
-        Assert.Equal(new[] { 448, 1272, 1472 }, merged.LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 448, 1272, 1472 }, merged.LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
         Assert.Equal(new[] { 448, 760, 136 }, merged.LaneA.Gaps);
 
         // LaneB: down 448 原样;up 704->1472
-        Assert.Equal(new[] { 448, 1472 }, merged.LaneB.ToAbsolutePositions());
+        Assert.Equal(new[] { 448, 1472 }, merged.LaneB.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
         Assert.Equal(new[] { 448, 960 }, merged.LaneB.Gaps);
+    }
+
+    [Fact]
+    public void ThreeWayMerge_PreservesItemTypesFromBothOriginalLines()
+    {
+        var net = new BeltNetwork();
+        // 先建两段东向线,分别插入不同类型的物品,再放中间那格触发三路合并
+        var (_, downId) = EastLineOn(net, (6, 3), (5, 3));
+        net.GetLine(downId).LaneA.TryInsertAtBack(10);
+
+        var (_, upId) = EastLineOn(net, (3, 3), (2, 3));
+        net.GetLine(upId).LaneA.TryInsertAtBack(20);
+
+        var mergedId = net.AddBelt(4, 3, E); // 触发三路合并
+        var positions = net.GetLine(mergedId).LaneA.ToAbsolutePositions();
+
+        Assert.Equal(2, positions.Count);
+        // 上游(离出口更远的一侧,down 是 6,3/5,3 段,up 是 3,3/2,3 段)保序:
+        // down 的物品(10)排在前面(离出口更近),up 的物品(20)排在后面。
+        Assert.Equal(10, positions[0].ItemProtoId);
+        Assert.Equal(20, positions[1].ItemProtoId);
     }
 
     [Fact]
@@ -320,7 +343,7 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack();   // gaps=[704]
+        lane.TryInsertAtBack(TestItem);   // gaps=[704]
         lane.Advance(704);         // gaps=[0],物品贴在出口(前沿 0,在出口格 [0,256))
         int discarded = net.RemoveBelt(5, 3);
         Assert.Equal(1, discarded);
@@ -334,7 +357,7 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768, k=2 removes tile [512,768)
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack();   // gaps=[704],abs 704
+        lane.TryInsertAtBack(TestItem);   // gaps=[704],abs 704
         lane.Advance(222);         // gaps=[482],abs 482:身体 [482,546] 从 tile (4,3) 跨进 (3,3)
         int discarded = net.RemoveBelt(3, 3);
         Assert.Equal(1, discarded); // 前沿 482 ∈ [512-63, 768) = [449,768) → 被清
@@ -385,14 +408,29 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
-        net.GetLine(id).LaneA.TryInsertAtBack(); // gaps=[1216],abs 1216(在 tile (2,3))
+        net.GetLine(id).LaneA.TryInsertAtBack(TestItem); // gaps=[1216],abs 1216(在 tile (2,3))
 
         net.RemoveBelt(4, 3); // k=2,cut = 3*256 = 768
         var backId = net.GetLineAt(2, 3);
 
         // 1216 >= 768 → 后半段,新前沿 1216 - 768 = 448
-        Assert.Equal(new[] { 448 }, net.GetLine(backId).LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 448 }, net.GetLine(backId).LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
         Assert.Equal(0, net.GetLine(id).LaneA.Count); // 前半段没物品
+    }
+
+    [Fact]
+    public void MiddleSplit_PreservesItemTypeInBackHalf()
+    {
+        var net = new BeltNetwork();
+        var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
+        net.GetLine(id).LaneA.TryInsertAtBack(30); // gaps=[1216],abs 1216(在后半段 tile (2,3))
+
+        net.RemoveBelt(4, 3); // 中间拆分,k=2,cut=768
+
+        var backId = net.GetLineAt(2, 3);
+        var positions = net.GetLine(backId).LaneA.ToAbsolutePositions();
+        Assert.Single(positions);
+        Assert.Equal(30, positions[0].ItemProtoId);
     }
 
     [Fact]
@@ -401,7 +439,7 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack(); // gaps=[1216]
+        lane.TryInsertAtBack(TestItem); // gaps=[1216]
         lane.Advance(576);       // gaps=[640],abs 640:落在被移格 tile 2 = [512,768)
 
         int discarded = net.RemoveBelt(4, 3);
@@ -417,7 +455,7 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack(); // gaps=[1216]
+        lane.TryInsertAtBack(TestItem); // gaps=[1216]
         lane.Advance(726);       // gaps=[490],abs 490:前沿在 tile 1 [256,512),身体 [490,554] 跨进被移格
 
         int discarded = net.RemoveBelt(4, 3); // 若清除区间不向前拓宽 W-1,这个物品会留在前半段,ShrinkBack 会抛
@@ -445,8 +483,8 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var id = net.AddBelt(5, 5, E);
         var line = net.GetLine(id);
-        line.LaneA.TryInsertAtBack(); line.LaneA.Advance(128); line.LaneA.TryInsertAtBack(); // 2 on LaneA
-        line.LaneB.TryInsertAtBack();                                                        // 1 on LaneB
+        line.LaneA.TryInsertAtBack(TestItem); line.LaneA.Advance(128); line.LaneA.TryInsertAtBack(TestItem); // 2 on LaneA
+        line.LaneB.TryInsertAtBack(TestItem);                                                        // 1 on LaneB
         Assert.Equal(3, net.RemoveBelt(5, 5));
         Assert.Empty(LiveLines(net));
     }
@@ -456,15 +494,15 @@ public class BeltNetworkTests
     {
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
-        net.GetLine(id).LaneA.TryInsertAtBack();          // LaneA abs 1216
-        net.GetLine(id).LaneB.TryInsertAtBack();          // LaneB abs 1216
+        net.GetLine(id).LaneA.TryInsertAtBack(TestItem);          // LaneA abs 1216
+        net.GetLine(id).LaneB.TryInsertAtBack(TestItem);          // LaneB abs 1216
         net.GetLine(id).LaneB.Advance(320);               // LaneB abs 896
 
         net.RemoveBelt(4, 3);                             // k=2, cut = 768
         var back = net.GetLine(net.GetLineAt(2, 3));
 
-        Assert.Equal(new[] { 448 }, back.LaneA.ToAbsolutePositions()); // 1216 - 768
-        Assert.Equal(new[] { 128 }, back.LaneB.ToAbsolutePositions()); // 896 - 768
+        Assert.Equal(new[] { 448 }, back.LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 1216 - 768
+        Assert.Equal(new[] { 128 }, back.LaneB.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 896 - 768
     }
 
     [Fact]
@@ -473,11 +511,11 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (5, 3), (4, 3), (3, 3)); // len 768, remove entry (3,3): k=2=n-1
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack();  // gaps=[704]
+        lane.TryInsertAtBack(TestItem);  // gaps=[704]
         lane.Advance(256);        // gaps=[448]:身体 [448,512) 全在 tile (4,3),不碰被移格
         int discarded = net.RemoveBelt(3, 3);
         Assert.Equal(0, discarded);
-        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions());
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
         Assert.Equal(512, net.GetLine(id).LengthSubTiles);
     }
 
@@ -487,11 +525,11 @@ public class BeltNetworkTests
         var net = new BeltNetwork();
         var (_, id) = EastLineOn(net, (6, 3), (5, 3), (4, 3), (3, 3), (2, 3)); // len 1280
         var lane = net.GetLine(id).LaneA;
-        lane.TryInsertAtBack();  // gaps=[1216]
+        lane.TryInsertAtBack(TestItem);  // gaps=[1216]
         lane.Advance(768);        // gaps=[448]:身体 [448,512) 全在 tile (5,3),不碰被移格 (4,3)
         int discarded = net.RemoveBelt(4, 3); // k=2, front half len 512
         Assert.Equal(0, discarded);
-        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions()); // 仍在前半段
+        Assert.Equal(new[] { 448 }, net.GetLine(id).LaneA.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 仍在前半段
         Assert.Equal(512, net.GetLine(id).LengthSubTiles);
         Assert.Equal(0, net.GetLine(net.GetLineAt(2, 3)).LaneA.Count);            // 后半段空
     }

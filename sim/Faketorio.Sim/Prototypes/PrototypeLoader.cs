@@ -20,6 +20,7 @@ public static class PrototypeLoader
         ResolveAndValidateRecipesAndPlayer(registry);
         ResolveAndValidateElectric(registry);
         ResolveAndValidateCraftingMachines(registry);
+        ResolveAndValidateMiningDrills(registry);
         return registry;
     }
 
@@ -38,6 +39,17 @@ public static class PrototypeLoader
                 throw new InvalidDataException($"Crafting machine '{m.Name}': outputSlots must be >= 1");
             if (m.EnergyUsageJPerTick < 0)
                 throw new InvalidDataException($"Crafting machine '{m.Name}': energyUsage must be >= 0");
+        }
+    }
+
+    // AssignIds() 之后:校验采矿机字段。
+    private static void ResolveAndValidateMiningDrills(PrototypeRegistry registry)
+    {
+        for (int i = 0; i < registry.Count; i++)
+        {
+            if (registry.GetById(i) is not MiningDrillPrototype d) continue;
+            if (d.EnergyUsageJPerTick < 0)
+                throw new InvalidDataException($"Mining drill '{d.Name}': energyUsage must be >= 0");
         }
     }
 
@@ -286,6 +298,13 @@ public static class PrototypeLoader
                 InputSlots = GetInt(el, "inputSlots", 0),
                 OutputSlots = GetInt(el, "outputSlots", 0),
                 EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var aEu) ? Units.ParsePower(aEu.GetString()!) : 0L,
+            }),
+            "mining-drill" => ValidateFootprint(new MiningDrillPrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var eu) ? Units.ParsePower(eu.GetString()!) : 0L,
             }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };

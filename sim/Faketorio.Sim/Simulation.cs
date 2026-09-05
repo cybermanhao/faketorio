@@ -24,6 +24,7 @@ public sealed class Simulation
     public Player Player { get; }
     public ElectricGrid ElectricGrid { get; } = new();
     public Machines Machines { get; } = new();
+    public MiningDrills MiningDrills { get; } = new();
 
     private readonly long _worldSeed;
     private readonly PlayerPrototype _playerProto;
@@ -62,12 +63,15 @@ public sealed class Simulation
         PlayerMine();
         PlayerCraft();
 
-        // 电网 + 加工:① 发电机登记供给 ② 机器登记需求 ③ 结算 ④ 发电机烧油 ⑤ 机器推进+完成
+        // 电网 + 加工 + 采矿:① 发电机登记供给 ② 机器/采矿机登记需求 ③ 结算
+        // ④ 发电机烧油 ⑤ 机器/采矿机推进+完成
         ElectricGeneratorsRegisterSupply();
         MachinesTickPreSettle();
+        MiningDrillsTickPreSettle();
         ElectricGrid.Settle();
         ElectricGeneratorsBurnFuel();
         MachinesTickPostSettle();
+        MiningDrillsTickPostSettle();
 
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
@@ -90,8 +94,8 @@ public sealed class Simulation
             if (!downId.IsValid) continue;
             var down = Belts.GetLine(downId);
             if (down.Tiles[^1] != (fx, fy)) continue;
-            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack()) line.LaneA.RemoveFront();
-            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack()) line.LaneB.RemoveFront();
+            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack(line.LaneA.FrontItemProtoId)) line.LaneA.RemoveFront();
+            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack(line.LaneB.FrontItemProtoId)) line.LaneB.RemoveFront();
         }
         Tick++;
     }
@@ -144,6 +148,7 @@ public sealed class Simulation
         Player.WriteState(writer);
         ElectricGrid.WriteState(writer);
         Machines.WriteState(writer);
+        MiningDrills.WriteState(writer);
     }
 
     private void PlayerWalk()
@@ -299,6 +304,8 @@ public sealed class Simulation
                     Inventories.AddContainer(id, cmp.OutputSlots, role: 2);
                     Machines.RegisterMachine(id);
                 }
+                if (proto is MiningDrillPrototype)
+                    MiningDrills.RegisterDrill(id);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -451,6 +458,7 @@ public sealed class Simulation
         bool isPole = proto is ElectricPolePrototype;
         bool isGenerator = proto is FuelGeneratorPrototype;
         bool isMachine = proto is CraftingMachinePrototype;
+        bool isDrill = proto is MiningDrillPrototype;
         World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
         Entities.Destroy(id);
         if (isBelt) Belts.RemoveBelt(bx, by);
@@ -467,6 +475,7 @@ public sealed class Simulation
             Inventories.RemoveContainer(id, role: 2);
             Machines.UnregisterMachine(id);
         }
+        if (isDrill) MiningDrills.UnregisterDrill(id);
     }
 
     // 扫实体池找发电机(同 belt 推进/WriteState 的索引序扫法,不给 ElectricGrid
@@ -619,5 +628,114 @@ public sealed class Simulation
         {
             Machines.RestartCycle(id, clearRecipe: proto is FurnacePrototype);
         }
+    }
+
+    // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
+    private void MiningDrillsTickPreSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            MiningDrillTickPreSettle(id, proto, data.X, data.Y, data.Rotation);
+        }
+    }
+
+    private void MiningDrillTickPreSettle(EntityId id, MiningDrillPrototype proto, int x, int y, byte rotation)
+    {
+        // 第 1 步:flush 已完成的产出
+        if (MiningDrills.IsCompleted(id))
+        {
+            int itemId = MiningDrills.GetPendingItemProtoId(id);
+            var (dx, dy) = BeltNetwork.Delta(rotation);
+            int outX = x + dx * proto.TileWidth;
+            int outY = y + dy * proto.TileHeight;
+
+            bool placed = false;
+            var outLineId = Belts.GetLineAt(outX, outY);
+            if (outLineId.IsValid)
+            {
+                var outLine = Belts.GetLine(outLineId);
+                placed = outLine.LaneA.TryInsertAtBack(itemId) || outLine.LaneB.TryInsertAtBack(itemId);
+            }
+            else
+            {
+                var outEntity = World.GetEntityAt(outX, outY);
+                var outInvId = outEntity.IsValid ? Inventories.GetInventoryId(outEntity) : InventoryId.Invalid;
+                if (outInvId.IsValid)
+                {
+                    var itemProto = (ItemPrototype)Prototypes.GetById(itemId);
+                    placed = Inventories.Get(outInvId).Insert(itemId, 1, itemProto.StackSize) > 0;
+                }
+            }
+
+            if (placed)
+            {
+                int tx = MiningDrills.GetTargetX(id), ty = MiningDrills.GetTargetY(id);
+                bool exhausted = Resources.GetResourceAt(tx, ty).IsEmpty;
+                MiningDrills.ResetAfterFlush(id, exhausted ? -1 : tx, exhausted ? -1 : ty);
+                // 本 tick 内继续走到第 2 步,placed==true 时不 return。
+            }
+            else
+            {
+                // 输出堵塞:跳过第 2 步,但仍登记待机能耗。
+                ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+                return;
+            }
+        }
+
+        // 第 2 步:目标搜索(仅当当前没有目标;第 1 步 flush 失败时不会走到这里)
+        if (MiningDrills.GetTargetX(id) == -1)
+        {
+            int cellCount = proto.TileWidth * proto.TileHeight;
+            for (int cell = 0; cell < cellCount; cell++)
+            {
+                int tx = x + cell % proto.TileWidth;
+                int ty = y + cell / proto.TileWidth;
+                if (!Resources.GetResourceAt(tx, ty).IsEmpty)
+                {
+                    MiningDrills.SetTarget(id, tx, ty);
+                    break;
+                }
+            }
+        }
+
+        // 第 3 步:电力需求登记(无条件——恒定待机能耗)
+        ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+    }
+
+    // 采矿:进度推进 + 产出(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
+    private void MiningDrillsTickPostSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            MiningDrillTickPostSettle(id, proto);
+        }
+    }
+
+    private void MiningDrillTickPostSettle(EntityId id, MiningDrillPrototype proto)
+    {
+        int tx = MiningDrills.GetTargetX(id), ty = MiningDrills.GetTargetY(id);
+        if (tx == -1 || MiningDrills.IsCompleted(id)) return;   // 无目标,或本 tick 刚 flush 失败仍在等
+
+        var cell = Resources.GetResourceAt(tx, ty);
+        if (cell.IsEmpty) { MiningDrills.ResetAfterFlush(id, -1, -1); return; }   // 目标被别人挖空了(比如玩家手挖),下 tick 重新搜
+        var resProto = (ResourcePrototype)Prototypes.GetById(cell.ResourceProtoId);
+        long threshold = (long)resProto.MiningTimeTicks << 16;
+
+        var satisfaction = ElectricGrid.GetSatisfaction(id);
+        long delta = proto.MiningSpeed.Mul(satisfaction.Raw);
+        if (MiningDrills.GetProgress(id) < threshold) MiningDrills.AddProgress(id, delta);
+        if (MiningDrills.GetProgress(id) < threshold) return;
+
+        var itemProto = Prototypes.Get<ItemPrototype>(resProto.MinableResult);
+        Resources.Extract(tx, ty, 1);
+        MiningDrills.MarkCompleted(id, itemProto.Id);
     }
 }

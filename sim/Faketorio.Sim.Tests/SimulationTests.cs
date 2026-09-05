@@ -988,4 +988,258 @@ public class SimulationTests
         sim.Step();
         Assert.True(sim.Machines.GetProgress(asmId) > 0);   // now advancing from 0
     }
+
+    private static Command PlaceDrill(Simulation sim, int x, int y, byte rotation = 0) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<MiningDrillPrototype>("electric-mining-drill").Id,
+        X = x, Y = y, Rotation = rotation,
+    };
+
+    // 同 P9 的 PlacePoweredMachineInfra:电线杆(0,0)+ 发电机(2,0)充好煤。
+    private static void PlacePoweredDrillInfra(Simulation sim)
+    {
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlaceGenerator(sim, 2, 0));
+        sim.Step();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+        sim.Submit(TransferTo(2, 0, coal, 5));
+        sim.Step();
+    }
+
+    [Fact]
+    public void MiningDrill_FindsResourceInFootprint_AndExtractsToOutputChest()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // Drill origin must stay within the pole's supplyAreaDistanceTiles (2, Chebyshev,
+        // measured from the entity's placement-time (X,Y) origin — see ElectricGrid).
+        // Pole is at (0,0), so (0,2) is right at the boundary; (0,3) would be unpowered.
+        // 采矿机 2x2 footprint 占 (0,2)-(1,3),朝东(rotation=1)输出到 (2,2)。
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        // Resources 是惰性生成的矿脉——用固定种子(NewSim 默认种子 0)读一遍 (0,2)-(1,3)
+        // 范围,找到实际有矿的格再断言(矿脉分布是种子的确定函数,不是本测试要验证的东西;
+        // 这里只需要确认"某个格有矿、采矿机能找到它、挖出对应物品、堆进箱子"这条流程通)。
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "test assumes the default seed puts at least one resource tile under (0,2)-(1,3) — if this fails, adjust the drill's placement coordinates to a spot the seeded map actually has ore under.");
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.True(chestInv.TotalItems() > 0);
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // still locked on a footprint tile (rich enough to outlast 200 ticks)
+    }
+
+    [Fact]
+    public void MiningDrill_OutputsToBelt_WithCorrectItemType()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // Same footprint/power reasoning as the chest test above: drill origin must stay
+        // within the pole's supplyAreaDistanceTiles (2, Chebyshev, from (0,0)).
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1)); // 朝东输出到 (2,2)
+        sim.Submit(new Command { Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 2, Y = 2, Rotation = 1 });
+        sim.Step();
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var lineId = sim.Belts.GetLineAt(2, 2);
+        Assert.True(lineId.IsValid);
+        var line = sim.Belts.GetLine(lineId);
+        bool hasItem = line.LaneA.Count > 0 || line.LaneB.Count > 0;
+        Assert.True(hasItem, "expected the drill's output to have landed on the belt at (2,2)");
+    }
+
+    [Fact]
+    public void MiningDrill_NoTargetInFootprint_NeverProgresses()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // (50,50) 起的 2x2 区域:若碰巧有矿,换一个更偏远的坐标直到全空(矿脉是无限惰性生成,
+        // 但任意固定 2x2 区域全空的概率不为零——用一个大坐标降低撞上矿脉密集区的概率)。
+        sim.Submit(PlaceDrill(sim, 5000, 5000, rotation: 1));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(5000, 5000);
+        bool anyResource = false;
+        for (int dy = 0; dy < 2; dy++)
+            for (int dx = 0; dx < 2; dx++)
+                if (!sim.Resources.GetResourceAt(5000 + dx, 5000 + dy).IsEmpty) anyResource = true;
+        Assert.False(anyResource, "test assumes (5000,5000)-(5001,5001) has no ore under the default seed — pick a different far-away coordinate if this ever becomes false");
+
+        for (int t = 0; t < 50; t++) sim.Step();
+
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId));
+        Assert.Equal(0, sim.MiningDrills.GetProgress(drillId));
+    }
+
+    [Fact]
+    public void MiningDrill_DestroyedMidCycle_UnregistersCleanly()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceDrill(sim, 10, 10, rotation: 1));
+        sim.Step();
+        var drillId = sim.World.GetEntityAt(10, 10);
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 10, Y = 10 });
+        sim.Step();
+
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId)); // 反查:摘除后读默认值,不抛异常
+        Assert.False(sim.World.GetEntityAt(10, 10).IsValid);
+    }
+
+    // C1 regression: a drill's locked target tile emptied by someone else (player
+    // hand-mining the ore under the drill, a neighbouring drill, ...) between the
+    // drill locking it and the drill completing its cycle. Post-settle used to
+    // read the now-empty cell and cast prototype id 0 (AssemblingMachinePrototype)
+    // to ResourcePrototype, throwing InvalidCastException straight out of Step().
+    // Unpowered drill is the simplest trigger — the cast happened before power was
+    // ever consulted.
+    [Fact]
+    public void MiningDrill_LockedTargetEmptiedExternally_DoesNotThrow_ReTargets()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1)); // no power infra — unpowered on purpose
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        int tx = sim.MiningDrills.GetTargetX(drillId), ty = sim.MiningDrills.GetTargetY(drillId);
+        Assert.NotEqual(-1, tx); // seed 0 has ore under (0,2)-(1,3); drill locks it regardless of power
+
+        var locked = sim.Resources.GetResourceAt(tx, ty);
+        sim.Resources.Extract(tx, ty, locked.Amount); // someone else empties the locked tile
+        Assert.True(sim.Resources.GetResourceAt(tx, ty).IsEmpty);
+
+        var ex = Record.Exception(() => sim.Step());
+        Assert.Null(ex); // used to be InvalidCastException out of Step()
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId)); // dropped the dead tile, will re-search next tick
+    }
+
+    [Fact]
+    public void MiningDrill_ExhaustedTargetTile_AutoReTargetsWithinFootprint()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+
+        int oreTiles = 0;
+        for (int dy = 0; dy < 2; dy++)
+            for (int dx = 0; dx < 2; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) oreTiles++;
+        Assert.True(oreTiles >= 2, "test needs >=2 resource tiles under (0,2)-(1,3) for the default seed — move the drill to a denser ore spot if this fails.");
+
+        int firstTx = sim.MiningDrills.GetTargetX(drillId), firstTy = sim.MiningDrills.GetTargetY(drillId);
+        Assert.NotEqual(-1, firstTx);
+
+        // Exhaust the locked tile out from under the drill.
+        var lockedCell = sim.Resources.GetResourceAt(firstTx, firstTy);
+        sim.Resources.Extract(firstTx, firstTy, lockedCell.Amount);
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        int newTx = sim.MiningDrills.GetTargetX(drillId), newTy = sim.MiningDrills.GetTargetY(drillId);
+        Assert.NotEqual(-1, newTx);                                     // didn't get stuck idle
+        Assert.False(newTx == firstTx && newTy == firstTy);             // moved off the exhausted tile
+        Assert.InRange(newTx, 0, 1);                                    // still inside the 2x2 footprint
+        Assert.InRange(newTy, 2, 3);
+        Assert.False(sim.Resources.GetResourceAt(newTx, newTy).IsEmpty);
+        Assert.True(chestInv.TotalItems() > 0);                         // kept producing across the re-target
+    }
+
+    [Fact]
+    public void MiningDrill_OutputBlocked_HoldsPendingThenResumesWhenSpaceFrees()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine (seed 0)
+
+        // Fill the output chest completely so the finished item has nowhere to go.
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int cap = chestInv.SlotCount * coalStack;
+        Assert.Equal(cap, chestInv.Insert(coal, cap, coalStack));
+
+        for (int t = 0; t < 200; t++) sim.Step(); // well past one 60-tick cycle at full power
+
+        Assert.True(sim.MiningDrills.IsCompleted(drillId));           // cycle done, item pending
+        long heldProgress = sim.MiningDrills.GetProgress(drillId);
+        for (int t = 0; t < 50; t++) sim.Step();
+        Assert.True(sim.MiningDrills.IsCompleted(drillId));           // still held, not dropped
+        Assert.Equal(heldProgress, sim.MiningDrills.GetProgress(drillId)); // progress frozen
+
+        chestInv.Remove(coal, coalStack); // free one slot
+        sim.Step();
+
+        Assert.False(sim.MiningDrills.IsCompleted(drillId));          // resumed
+        Assert.True(sim.MiningDrills.GetProgress(drillId) < heldProgress); // fresh cycle (one tick in), not the held full-cycle value
+        Assert.True(chestInv.TotalItems() > (chestInv.SlotCount - 1) * coalStack); // pending item flushed in
+    }
+
+    [Fact]
+    public void MiningDrill_UnderpoweredSatisfaction_TakesTwiceAsLong()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId));
+
+        // A competing PrimaryInput consumer demanding exactly the drill's own draw
+        // (both "90kW" = 1500 J/tick) doubles demand against the generator's fixed
+        // 1500 J/tick supply -> both settle to satisfaction 0.5 -> progress at half
+        // rate (Settle() broadcasts one ratio per tier — see P9's
+        // Machine_UnderpoweredSatisfaction_TakesTwiceAsLong).
+        long drillDemand = sim.Prototypes.Get<MiningDrillPrototype>("electric-mining-drill").EnergyUsageJPerTick;
+        var fakeConsumer = new EntityId(999, 1);
+
+        int tick = 0;
+        while (chestInv.TotalItems() == 0 && tick < 400)
+        {
+            sim.ElectricGrid.RegisterDemand(fakeConsumer, 0, 0, UsagePriority.PrimaryInput, drillDemand);
+            sim.Step();
+            tick++;
+        }
+
+        // Full-power baseline is ~61 ticks (60-tick resource + 1 flush); at half
+        // power ~121 + 1. Bracket generously (like P9's underpowered test) so this
+        // catches "throttling ignored" without pinning an exact flush off-by-one.
+        Assert.InRange(tick, 90, 170);
+    }
 }

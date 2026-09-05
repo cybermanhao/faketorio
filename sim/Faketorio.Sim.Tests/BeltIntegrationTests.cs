@@ -8,6 +8,7 @@ namespace Faketorio.Sim.Tests;
 public class BeltIntegrationTests
 {
     private const byte N = 0, E = 1, S = 2, W = 3;
+    private const int TestItem = 1;
 
     private static Simulation NewSim() => new(PrototypeLoader.LoadFromDirectory("data/base"));
 
@@ -31,7 +32,7 @@ public class BeltIntegrationTests
     {
         var sim = NewSim();
         PlaceBelt(sim, 0, 0, E);
-        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(); // gaps=[192]
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(TestItem); // gaps=[192]
         sim.Step();
         Assert.Equal(new[] { 184 }, LineAt(sim, 0, 0).LaneA.Gaps); // speed 8: 192-8
         sim.Step();
@@ -43,7 +44,7 @@ public class BeltIntegrationTests
     {
         var sim = NewSim();
         PlaceBelt(sim, 0, 0, E);
-        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(); // gaps=[192]
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(TestItem); // gaps=[192]
         for (int t = 0; t < 24; t++) sim.Step(); // 192 / 8 = 24
         Assert.True(LineAt(sim, 0, 0).LaneA.IsFrontReady);
         Assert.Equal(new[] { 0 }, LineAt(sim, 0, 0).LaneA.Gaps);
@@ -68,7 +69,7 @@ public class BeltIntegrationTests
     // 把一条 256 长的 lane 塞满 4 个物品:交替 insert / advance-to-compress。
     private static void Pack(BeltLane lane)
     {
-        while (lane.TryInsertAtBack())
+        while (lane.TryInsertAtBack(TestItem))
             lane.Advance(256); // 把刚插入的物品推到出口,为下一个腾出入口空间
     }
 
@@ -82,8 +83,8 @@ public class BeltIntegrationTests
         PlaceBelt(sim, 3, 0, S); PlaceBelt(sim, 3, 1, S); PlaceBelt(sim, 3, 2, S);
         Assert.Equal(2, LiveLineCount(sim)); // 方向不同,两条独立线
 
-        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(); // 放在 A 入口
-        LineAt(sim, 0, 0).LaneB.TryInsertAtBack();
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(10); // 放在 A 入口
+        LineAt(sim, 0, 0).LaneB.TryInsertAtBack(20);
 
         // A 上走 704 (=3*256-64) 亚格,过拐角,再在 B 上走 704;每 tick 8;留足余量
         for (int t = 0; t < 704 / 8 + 704 / 8 + 20; t++) sim.Step();
@@ -92,6 +93,8 @@ public class BeltIntegrationTests
         Assert.Equal(1, LineAt(sim, 3, 2).LaneA.Count);  // 物品到了 B
         Assert.Equal(0, LineAt(sim, 0, 0).LaneB.Count);
         Assert.Equal(1, LineAt(sim, 3, 2).LaneB.Count);
+        Assert.Equal(10, LineAt(sim, 3, 2).LaneA.FrontItemProtoId); // 类型跟着走,不是只有数量
+        Assert.Equal(20, LineAt(sim, 3, 2).LaneB.FrontItemProtoId);
     }
 
     [Fact]
@@ -104,7 +107,7 @@ public class BeltIntegrationTests
         PlaceBelt(sim, 0, 1, N);
         Assert.Equal(4, LiveLineCount(sim)); // 四格四向,互不合并
 
-        LineAt(sim, 0, 0).LaneA.TryInsertAtBack();
+        LineAt(sim, 0, 0).LaneA.TryInsertAtBack(TestItem);
         for (int t = 0; t < 300; t++) sim.Step(); // 一圈 ≈ 4*24 tick,跑多圈
 
         int total = LineAt(sim, 0, 0).LaneA.Count + LineAt(sim, 1, 0).LaneA.Count
