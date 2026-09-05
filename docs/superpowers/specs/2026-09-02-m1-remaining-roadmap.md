@@ -6,7 +6,7 @@
 
 ## 进度快照(2026-09-05,更新)
 
-`main` HEAD `0a1f8d1`;`dotnet test sim/Faketorio.Sim.Tests` = **369 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+`main` HEAD `7a06760`;`dotnet test sim/Faketorio.Sim.Tests` = **401 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
 
 | 子项目 | 状态 | 主线提交(合并后) |
 |---|---|---|
@@ -22,15 +22,17 @@
 | **P7** 电网(电线杆连通分量 + supply_area + 每 tick 每网结算 + 缺电降速 + satisfaction + 燃料发电机,P8 并入本项) | ✅ 已合并·已验证 | `f058345`..`bc9c8ae` |
 | **P9** 加工状态机(熔炉自动匹配 + 装配机 SetRecipe 共用两趟 tick,satisfaction 等比降速) | ✅ 已合并·已验证 | `a9ed5c4`..`0c93ac1` |
 | **P10** typed belt items + 电力采矿机(footprint 单目标找矿 + satisfaction 降速 + 输出 belt/箱子;并入了 typed belt items 前置项) | ✅ 已合并·已验证 | `4732384`..`0a1f8d1` |
-| **P11** 机械臂(belt lane ↔ inventory 抓/放) | ⬜ 未开始 | — |
+| **P11** 机械臂(belt lane ↔ inventory 抓/放,转速模型 + satisfaction 降速 + 两段摆臂,按子格位置抓/插传送带) | ✅ 已合并·已验证 | `947abd8`..`7a06760` |
 | 横切 · **typed belt items** | ✅ 已合并(并入 P10 Task 1) | `039748f` |
-| 横切 · RotateEntity 命令 | ⬜ 未立项(单独小 plan) | — |
-| 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项 · **P9 已落地机器状态,现在可以立项**(P9 最终审查建议:两趟全量扫描 + 每 tick 重查 Inventories/Prototypes 是天然的优化落点) | — |
-| 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ⬜ 未立项 · **建议 P7/P9 前立最小回归基线**(当前仓库无 CI / 无基准项目) | — |
+| 横切 · RotateEntity 命令 | ⬜ 未立项(单独小 plan;P10/P11 已用"放置期 `Command.Rotation` 定死"绕过,只有想让玩家事后转向才需要) | — |
+| 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项 · **P9/P10/P11 都是两趟全量扫描 + 每 tick 重查 Inventories/Prototypes/Belts,是天然的优化落点**;P11 最终审查另指出 `InserterTickPostSettle` 里 `delta` 在阶段 A 也无条件算(每空闲机械臂每 tick 一次多余 `GetSatisfaction` 查表),可顺手收 | — |
+| 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ⬜ 未立项 · **建议在做实体休眠优化前立最小回归基线**(当前仓库无 CI / 无基准项目) | — |
+| 横切 · "销毁掉落物品"统一处理(所有实体) | ⬜ 未立项 · 目前全代码库一致丢弃(传送带/箱子/P9 完成品/P10 pending/P11 手上物品);P11 最终审查:**无电机械臂仍会执行阶段 A 抓取**,物品能被死机械臂从传送带上拿走并卡在手里(确定、有界、来电即恢复,但与 Factorio 不符),和"销毁掉落"一起考虑 | — |
+| 横切 · 机器 role-1 输入库存加物品过滤 | ⬜ 未立项 · P9 model gap:机器输入库存无过滤,机械臂会往熔炉输入里推任何物品;P11 是第一个能自动大规模触发它的系统 | — |
 
-完成度分层看:M1 模拟基础设施 + 采矿→加工→存储→电力全链条 ≈ P1–P10 已落地(挖矿/自动采矿→手搓→熔炼→装配→存储→电力,传送带现在带物品类型);机械臂(自动物流)未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。P7 执行期确认:发电机结算的多生产者取整用 Hamilton(最大余数法)分配以保证守恒且不超容量;`TransferFromEntity` 的搬回逻辑改为搬移前按目标容量夹紧,避免 readOnly 库存下的物品消失。P9 执行期确认:机器输入/输出实际落地成普通 `Inventory`(按 `role` 区分,非 readOnly)而非 P7 预想的 readOnly 库存,故上述修复目前仍是防御性代码,未被任何现有路径触发——一旦 P11 机械臂能从机器库存搬东西,`Simulation.MachineTickPostSettle` 的完成前重校验分支(§P9 spec)会从"防御性、不可达"变成真正会走到的分支,当时要把它从"重置进度"改成"冻结进度"以保持与进度推进阶段一致的语义(P9 最终审查已记录为一条待办)。P10 执行期确认:采矿机输出方向复用放置期 `Command.Rotation`(不建 `RotateEntity` 命令);采矿机目标格被外部(玩家手挖)挖空会触发 `MiningDrillTickPostSettle` 里对空矿格的 `ResourcePrototype` 强转崩溃,已在最终审查修复轮加 `cell.IsEmpty` 守卫——**这类"锁定的世界格子被别的系统改掉"的 race 是 P11 机械臂、以及任何未来能改 `ResourceGrid`/机器库存的系统都要小心的模式**。另:实体被销毁时手里的待放置物品(采矿机/传送带/箱子/P9 机器完成品)一律丢弃,M1 没有掉落到世界的机制,这是全代码库一致的既有行为,将来若要"销毁掉落"需单独立项统一处理所有实体。
+完成度分层看:**M1 模拟层垂直切片的核心闭环已全部落地** ≈ P1–P11(挖矿/自动采矿 → 手搓/熔炼/装配 → 传送带带类型物流 → 机械臂自动搬运 → 存储,全程电力驱动且缺电降速,确定性状态哈希基建齐全)。剩下的都是横切优化项(实体休眠/CI 基准/RotateEntity/销毁掉落/输入过滤)和表现层(Godot 工程 + UI,不在本系列 sim 计划范围)。P7 执行期确认:发电机结算的多生产者取整用 Hamilton(最大余数法)分配以保证守恒且不超容量;`TransferFromEntity` 的搬回逻辑改为搬移前按目标容量夹紧,避免 readOnly 库存下的物品消失。P9 执行期确认:机器输入/输出实际落地成普通 `Inventory`(按 `role` 区分,非 readOnly)而非 P7 预想的 readOnly 库存,故上述修复目前仍是防御性代码,未被任何现有路径触发——一旦 P11 机械臂能从机器库存搬东西,`Simulation.MachineTickPostSettle` 的完成前重校验分支(§P9 spec)会从"防御性、不可达"变成真正会走到的分支,当时要把它从"重置进度"改成"冻结进度"以保持与进度推进阶段一致的语义(P9 最终审查已记录为一条待办)。P10 执行期确认:采矿机输出方向复用放置期 `Command.Rotation`(不建 `RotateEntity` 命令);采矿机目标格被外部(玩家手挖)挖空会触发 `MiningDrillTickPostSettle` 里对空矿格的 `ResourcePrototype` 强转崩溃,已在最终审查修复轮加 `cell.IsEmpty` 守卫——**这类"锁定的世界格子被别的系统改掉"的 race 是 P11 机械臂、以及任何未来能改 `ResourceGrid`/机器库存的系统都要小心的模式**。另:实体被销毁时手里的待放置物品(采矿机/传送带/箱子/P9 机器完成品)一律丢弃,M1 没有掉落到世界的机制,这是全代码库一致的既有行为,将来若要"销毁掉落"需单独立项统一处理所有实体。
 
-下一步:**P11 机械臂**(belt lane ↔ inventory 抓/放,依赖 P4 + P9 + P10 的 typed belt items);或先做几个横切小项(`RotateEntity`、实体休眠/活跃列表、CI 基准场景)。
+下一步:核心 sim 闭环(P1–P11)已完成。剩余候选(无强依赖顺序,按价值/成本挑):① CI 基准场景 + 回归基线(其它优化的前置);② 实体休眠 / 活跃列表(P9/P10/P11 三个两趟扫描是共同落点);③ 机器输入库存加过滤 + "销毁掉落物品"统一处理;④ `RotateEntity` 命令(仅在要让玩家事后转向时);⑤ 转向表现层(Godot 工程接线 + 只读渲染 + 命令 UI),不在本 sim 计划系列内,需单独 brainstorm。
 
 ## 0. 背景
 

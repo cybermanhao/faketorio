@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `947abd8`..`7a06760`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。Task 3 有一轮修复补了 role-2 机器输出抓取分支的测试。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Add an inserter entity that moves one item at a time between an adjacent pickup tile and an adjacent dropoff tile — from a belt lane / container / machine-output inventory, to a belt lane / container / machine-input inventory — driven by a rotation-speed swing model throttled by electric satisfaction. This closes the M1 automation loop (drill → belt → inserter → furnace → inserter → belt → chest).
 
 **Architecture:** `BeltLane` gains two primitives: `TryRemoveItemInRange` returns the grabbed item's type via an `out`, and a new `TryInsertAt` does a mid-lane position-based insert with structural overlap/length checks. `InserterPrototype` (static data) + `Inserters` (pure `Dictionary<EntityId, InserterState>` runtime-state container, flat `namespace Faketorio.Sim;` — same fix P5's `Player`, P9's `Machines`, P10's `MiningDrills` all needed) + a two-pass `Simulation` tick mirroring P10's `Settle()`-bracketing pattern, sharing the one `ElectricGrid.Settle()`. The inserter's swing is a `SwingProgress` accumulator running `0 → Q16.One` (swing-out, holding an item) then `Q16.One → 2×Q16.One` (swing-back, empty, cannot grab) — the return swing is what gives placement its minimum interval.
