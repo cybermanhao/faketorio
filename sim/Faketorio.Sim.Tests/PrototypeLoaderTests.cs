@@ -254,4 +254,40 @@ public class PrototypeLoaderTests
     [Fact]
     public void GeneratorUnknownFuelItem_Throws() => AssertLoadThrows(
         "[{ \"type\": \"fuel-generator\", \"name\": \"g\", \"powerOutput\": \"90kW\", \"fuelItemName\": \"nonexistent\" }]");
+
+    [Fact]
+    public void LoadsFurnace()
+    {
+        var furnace = Load().Get<FurnacePrototype>("stone-furnace");
+        Assert.Equal("smelting", furnace.Category);
+        Assert.Equal(1, furnace.InputSlots);
+        Assert.Equal(1, furnace.OutputSlots);
+        Assert.Equal(1500, furnace.EnergyUsageJPerTick);   // 90kW / 60 ticks-per-second
+    }
+
+    [Fact]
+    public void LoadsAssemblingMachine()
+    {
+        var asm = Load().Get<AssemblingMachinePrototype>("assembling-machine-1");
+        Assert.Equal("crafting", asm.Category);
+        Assert.Equal(2, asm.InputSlots);
+        Assert.Equal(1, asm.OutputSlots);
+        Assert.Equal(1250, asm.EnergyUsageJPerTick);   // 75kW / 60 ticks-per-second
+    }
+
+    [Fact]
+    public void CraftingMachineEmptyCategory_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"furnace\", \"name\": \"f\", \"category\": \"\", \"inputSlots\": 1, \"outputSlots\": 1 }]");
+
+    [Fact]
+    public void CraftingMachineZeroInputSlots_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"furnace\", \"name\": \"f\", \"category\": \"smelting\", \"inputSlots\": 0, \"outputSlots\": 1 }]");
+
+    [Fact]
+    public void CraftingMachineZeroOutputSlots_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"assembling-machine\", \"name\": \"a\", \"category\": \"crafting\", \"inputSlots\": 1, \"outputSlots\": 0 }]");
+
+    [Fact]
+    public void CraftingMachineNegativeEnergyUsage_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"furnace\", \"name\": \"f\", \"category\": \"smelting\", \"inputSlots\": 1, \"outputSlots\": 1, \"energyUsage\": \"-120W\" }]");
 }

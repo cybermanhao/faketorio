@@ -716,4 +716,276 @@ public class SimulationTests
         Assert.Equal(50, sim.Player.Inventory.CountOf(coal));  // 只搬了玩家吃得下的 50 个
         Assert.Equal(30, chestInv.CountOf(coal));              // 箱子里剩下搬不走的 30 个
     }
+
+    private static Command PlaceFurnace(Simulation sim, int x, int y) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<FurnacePrototype>("stone-furnace").Id,
+        X = x, Y = y, Rotation = 0,
+    };
+
+    private static Command PlaceAssembler(Simulation sim, int x, int y) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<AssemblingMachinePrototype>("assembling-machine-1").Id,
+        X = x, Y = y, Rotation = 0,
+    };
+
+    private static Command SetRecipe(int x, int y, int recipeProtoId) => new()
+        { Type = CommandType.SetRecipe, X = x, Y = y, ProtoId = recipeProtoId };
+
+    // Shared setup: pole(0,0) + generator(2,0) fueled with coal, then a
+    // furnace or assembler at (0,2) — Chebyshev distance 2 from the pole,
+    // matching small-electric-pole's supplyAreaDistanceTiles (2). Every test
+    // below that expects a machine to actually make progress needs this —
+    // ElectricGrid.GetSatisfaction defaults to Q16.Zero for any demand with
+    // no reachable network AND for any demand on a network with zero
+    // registered supply, so a machine with no pole+generator never advances
+    // at all (this is the exact mistake an earlier draft of this plan made
+    // and is why every progress-observing test below places power first).
+    private static void PlacePoweredMachineInfra(Simulation sim)
+    {
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlaceGenerator(sim, 2, 0));
+        sim.Step();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);   // player has no coal by default (data/base/player.json)
+        sim.Submit(TransferTo(2, 0, coal, 5));
+        sim.Step();
+    }
+
+    [Fact]
+    public void Furnace_AutoMatchesAndSmeltsIronOre()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
+
+        // iron-plate is 192 ticks (3.2s); the generator's 1500 J/tick output
+        // exactly matches the furnace's 1500 J/tick demand (both "90kW" in
+        // data/base), so with no competing consumer it runs at full
+        // satisfaction — 192 ticks to complete + 1 more tick for the next
+        // PreSettle to flush the output. 200 gives comfortable headroom.
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.Equal(1, outputInv.CountOf(plateId));
+        Assert.Equal(0, inputInv.CountOf(oreId));   // consumed
+    }
+
+    [Fact]
+    public void AssemblingMachine_WithoutSetRecipe_NeverConsumesInput()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 0));
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 0);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        inputInv.Insert(plateId, 2, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+
+        for (int t = 0; t < 100; t++) sim.Step();
+
+        Assert.Equal(2, inputInv.CountOf(plateId));   // untouched — no recipe ever set
+    }
+
+    [Fact]
+    public void AssemblingMachine_SetRecipe_LoopsSameRecipeAcrossBatches()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceAssembler(sim, 0, 2));
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 2);
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int gearId = sim.Prototypes.Get<ItemPrototype>("iron-gear-wheel").Id;
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 2));
+        inputInv.Insert(plateId, 4, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);   // 2 batches worth
+
+        sim.Submit(SetRecipe(0, 2, gearRecipeId));
+        sim.Step();
+
+        // iron-gear-wheel is 30 ticks (0.5s); the generator's 1500 J/tick
+        // output covers the assembler's 1250 J/tick demand fully (satisfaction
+        // == One), so each batch completes in 30 ticks + 1 flush tick; two
+        // batches back-to-back (assembler recipe stays set — no second
+        // SetRecipe needed) comfortably fit in 100 more ticks.
+        for (int t = 0; t < 100; t++) sim.Step();
+
+        Assert.Equal(2, outputInv.CountOf(gearId));
+        Assert.Equal(0, inputInv.CountOf(plateId));
+    }
+
+    [Fact]
+    public void SetRecipe_RejectsFurnaceTarget()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceFurnace(sim, 0, 0));
+        sim.Step();
+        int recipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+
+        sim.Submit(SetRecipe(0, 0, recipeId));
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void SetRecipe_RejectsNonMachineTarget()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 0));
+        sim.Step();
+        int recipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+
+        sim.Submit(SetRecipe(0, 0, recipeId));
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void SetRecipe_RejectsCategoryMismatch()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 0));
+        sim.Step();
+        int smeltingRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-plate").Id;   // category "smelting"
+
+        sim.Submit(SetRecipe(0, 0, smeltingRecipeId));
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void Machine_UnderpoweredSatisfaction_TakesTwiceAsLong()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+
+        // A second PrimaryInput consumer demanding exactly the furnace's own
+        // demand (both "90kW" = 1500 J/tick) doubles total demand (3000)
+        // against the generator's fixed 1500 J/tick supply, giving BOTH
+        // consumers satisfaction == 0.5 (Settle() broadcasts one ratio per
+        // tier, not a per-registrant split — see ElectricGrid.SettleNetwork).
+        // Progress advances at half the per-tick rate, so completion takes
+        // ~2x as many ticks as the unthrottled 192 + 1 flush tick baseline.
+        long furnaceDemand = sim.Prototypes.Get<FurnacePrototype>("stone-furnace").EnergyUsageJPerTick;
+        var fakeConsumer = new EntityId(999, 1);
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
+
+        int tick = 0;
+        while (outputInv.CountOf(plateId) == 0 && tick < 500)
+        {
+            sim.ElectricGrid.RegisterDemand(fakeConsumer, 0, 0, UsagePriority.PrimaryInput, furnaceDemand);
+            sim.Step();
+            tick++;
+        }
+
+        // Comfortably brackets the ~385-tick expected value (2*192 + 1 flush
+        // tick) while staying far above the 193-tick full-speed baseline, so
+        // this still catches a "throttling doesn't work" regression without
+        // depending on an exact off-by-one in the flush-timing arithmetic.
+        Assert.InRange(tick, 300, 450);
+    }
+
+    [Fact]
+    public void Machine_StandbyEnergyRegisteredEvenWhenIdle()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();   // furnace has no ore yet — idles, but must still register demand
+
+        var fakeConsumer = new EntityId(999, 1);
+        long furnaceDemand = sim.Prototypes.Get<FurnacePrototype>("stone-furnace").EnergyUsageJPerTick;
+
+        // The generator's output (1500 J/tick) exactly equals furnaceDemand.
+        // If the idle furnace registered 0 demand, this consumer alone would
+        // fully consume the generator's output (satisfaction == One); since
+        // the idle furnace's standby draw competes for the same 1500 J/tick,
+        // this consumer is throttled to half instead.
+        sim.ElectricGrid.RegisterDemand(fakeConsumer, 0, 0, UsagePriority.PrimaryInput, furnaceDemand);
+        sim.Step();
+
+        Assert.NotEqual(Q16.One, sim.ElectricGrid.GetSatisfaction(fakeConsumer));
+    }
+
+    [Fact]
+    public void Machine_OutputBlocked_HoldsCompletedUntilSpaceFrees()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        outputInv.Insert(plateId, plateStack, plateStack);   // pre-fill the furnace's one output slot
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.Equal(0, inputInv.CountOf(oreId));            // consumed at completion
+        Assert.Equal(plateStack, outputInv.CountOf(plateId)); // still full — flush blocked
+
+        outputInv.Remove(plateId, plateStack);   // free the output
+        sim.Step();
+
+        Assert.Equal(1, outputInv.CountOf(plateId));   // flushed on the next tick
+    }
+
+    [Fact]
+    public void AssemblingMachine_MissingIngredients_FreezesProgressWithoutResetting()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceAssembler(sim, 0, 2));
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 2);
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+        sim.Submit(SetRecipe(0, 2, gearRecipeId));
+        sim.Step();
+
+        for (int t = 0; t < 50; t++) sim.Step();   // input inventory still empty the whole time
+
+        Assert.Equal(0, sim.Machines.GetProgress(asmId));
+        Assert.Equal(gearRecipeId, sim.Machines.GetCurrentRecipe(asmId));   // not reset
+
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        inputInv.Insert(plateId, 2, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+
+        sim.Step();
+        Assert.True(sim.Machines.GetProgress(asmId) > 0);   // now advancing from 0
+    }
 }

@@ -236,4 +236,40 @@ public class DeterminismTests
     [Fact]
     public void ElectricScenario_SameSeedSameCommands_SameHashEveryTick()
         => Assert.Equal(RunElectricScenario(4242), RunElectricScenario(4242));
+
+    private static List<ulong> RunMachineScenario(long seed)
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int ore = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int oreStack = sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+        sim.Player.Inventory.Insert(ore, 5, oreStack);
+
+        var hashes = new List<ulong>();
+        for (int t = 0; t < 250; t++)
+        {
+            if (t == 0)
+            {
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<ElectricPolePrototype>("small-electric-pole").Id, X = 0, Y = 0 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").Id, X = 2, Y = 0 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<FurnacePrototype>("stone-furnace").Id, X = 0, Y = 2 });
+            }
+            if (t == 5)
+                sim.Submit(new Command { Type = CommandType.TransferToEntity, X = 2, Y = 0, ProtoId = coal, Count = 5 });
+            if (t == 6)
+                sim.Submit(new Command { Type = CommandType.TransferToEntity, X = 0, Y = 2, ProtoId = ore, Count = 3 });
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void MachineScenario_SameSeedSameCommands_SameHashEveryTick()
+        => Assert.Equal(RunMachineScenario(4242), RunMachineScenario(4242));
 }

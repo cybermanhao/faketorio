@@ -11,6 +11,7 @@ public enum CommandType : byte
     CraftEnqueue = 7,
     TransferToEntity = 8,
     TransferFromEntity = 9,
+    SetRecipe = 10,
 }
 
 public struct Command

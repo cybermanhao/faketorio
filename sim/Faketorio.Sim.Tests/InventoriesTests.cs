@@ -116,4 +116,58 @@ public class InventoriesTests
         var id = inv.AddContainer(new EntityId(1, 1), 1);   // 现有单参数调用形态不变
         Assert.Equal(5, inv.Get(id).Insert(42, 5, 50));
     }
+
+    [Fact]
+    public void AddContainer_DifferentRoles_AreIndependent()
+    {
+        var inv = new Inventories();
+        var e = new EntityId(5, 1);
+        var inputId = inv.AddContainer(e, 1, role: 1);
+        var outputId = inv.AddContainer(e, 1, role: 2);
+
+        inv.Get(inputId).Insert(Iron, Stack, Stack);   // fill role 1's one slot fully
+
+        Assert.NotEqual(inputId, outputId);
+        Assert.Equal(Stack, inv.Get(inputId).CountOf(Iron));
+        Assert.Equal(0, inv.Get(outputId).CountOf(Iron));
+        Assert.True(inv.Get(outputId).CanInsert(Iron, Stack, Stack));   // role 2 untouched by role 1 being full
+    }
+
+    [Fact]
+    public void GetInventoryId_UnknownRole_ReturnsInvalid()
+    {
+        var inv = new Inventories();
+        var e = new EntityId(6, 1);
+        inv.AddContainer(e, 1, role: 1);
+
+        Assert.False(inv.GetInventoryId(e, role: 2).IsValid);
+        Assert.True(inv.GetInventoryId(e, role: 1).IsValid);
+    }
+
+    [Fact]
+    public void RemoveContainer_WithRole_OnlyRemovesThatRole()
+    {
+        var inv = new Inventories();
+        var e = new EntityId(7, 1);
+        inv.AddContainer(e, 1, role: 1);
+        var outputId = inv.AddContainer(e, 1, role: 2);
+
+        inv.RemoveContainer(e, role: 1);
+
+        Assert.False(inv.GetInventoryId(e, role: 1).IsValid);
+        Assert.True(inv.GetInventoryId(e, role: 2).IsValid);
+        Assert.Equal(outputId, inv.GetInventoryId(e, role: 2));
+    }
+
+    [Fact]
+    public void DefaultRole_UnaffectedByOtherRolesOnSameEntity()
+    {
+        var inv = new Inventories();
+        var e = new EntityId(8, 1);
+        var defaultId = inv.AddContainer(e, 16);          // role 0, same as every pre-P9 call site
+        inv.AddContainer(e, 1, role: 1);
+
+        Assert.Equal(defaultId, inv.GetInventoryId(e));    // GetInventoryId(e) still means role 0
+        Assert.Equal(defaultId, inv.GetInventoryId(e, role: 0));
+    }
 }

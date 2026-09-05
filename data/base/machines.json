@@ -1,0 +1,6 @@
+[
+  { "type": "furnace", "name": "stone-furnace", "tileWidth": 2, "tileHeight": 2,
+    "category": "smelting", "inputSlots": 1, "outputSlots": 1, "energyUsage": "90kW" },
+  { "type": "assembling-machine", "name": "assembling-machine-1", "tileWidth": 3, "tileHeight": 3,
+    "category": "crafting", "inputSlots": 2, "outputSlots": 1, "energyUsage": "75kW" }
+]
