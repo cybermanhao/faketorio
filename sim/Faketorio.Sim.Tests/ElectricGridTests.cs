@@ -99,4 +99,112 @@ public class ElectricGridTests
         Assert.False(grid.FindNetworkAt(0, 0).IsValid);
         Assert.True(grid.FindNetworkAt(6, 0).IsValid);
     }
+
+    private static ElectricGrid GridWithOnePole()
+    {
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 7, supplyAreaDistanceTiles: 5);
+        return grid;
+    }
+
+    [Fact]
+    public void SupplyMeetsExactDemand_FullSatisfaction_NoOverproduction()
+    {
+        var grid = GridWithOnePole();
+        var producer = new EntityId(1, 1); var consumer = new EntityId(2, 1);
+
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1000);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 1000);
+        grid.Settle();
+
+        Assert.Equal(Q16.One, grid.GetSatisfaction(consumer));
+        Assert.Equal(1000, grid.GetAllocatedSupply(producer));
+    }
+
+    [Fact]
+    public void SupplyExceedsDemand_ProducerThrottlesDown()
+    {
+        var grid = GridWithOnePole();
+        var producer = new EntityId(1, 1); var consumer = new EntityId(2, 1);
+
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1000);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 400);
+        grid.Settle();
+
+        Assert.Equal(Q16.One, grid.GetSatisfaction(consumer));
+        Assert.Equal(400, grid.GetAllocatedSupply(producer));   // 不多烧
+    }
+
+    [Fact]
+    public void DemandExceedsSupply_ProducerFullOutput_ConsumerPartialSatisfaction()
+    {
+        var grid = GridWithOnePole();
+        var producer = new EntityId(1, 1); var consumer = new EntityId(2, 1);
+
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 500);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 1000);
+        grid.Settle();
+
+        Assert.Equal(500, grid.GetAllocatedSupply(producer));
+        Assert.Equal(Q16.FromRatio(500, 1000), grid.GetSatisfaction(consumer));
+    }
+
+    [Fact]
+    public void TwoProducersSameTier_ShareProportionally()
+    {
+        var grid = GridWithOnePole();
+        var p1 = new EntityId(1, 1); var p2 = new EntityId(2, 1); var consumer = new EntityId(3, 1);
+
+        grid.RegisterSupply(p1, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1000);
+        grid.RegisterSupply(p2, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 1000);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 1000);
+        grid.Settle();
+
+        Assert.Equal(500, grid.GetAllocatedSupply(p1));   // 各自一半,不是一个满一个空
+        Assert.Equal(500, grid.GetAllocatedSupply(p2));
+    }
+
+    [Fact]
+    public void ShortfallAbsorbedByLowestPriorityDemandFirst()
+    {
+        var grid = GridWithOnePole();
+        var producer = new EntityId(1, 1);
+        var primaryConsumer = new EntityId(2, 1);
+        var tertiaryConsumer = new EntityId(3, 1);
+
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 800);
+        grid.RegisterDemand(primaryConsumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 800);
+        grid.RegisterDemand(tertiaryConsumer, 0, 0, UsagePriority.Tertiary, amountJ: 400);
+        grid.Settle();
+
+        Assert.Equal(Q16.One, grid.GetSatisfaction(primaryConsumer));
+        Assert.Equal(Q16.Zero, grid.GetSatisfaction(tertiaryConsumer));
+    }
+
+    [Fact]
+    public void UncoveredProducerAndConsumer_ZeroAllocation()
+    {
+        var grid = new ElectricGrid();   // no poles at all
+        var producer = new EntityId(0, 1); var consumer = new EntityId(1, 1);
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, 1000);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, 1000);
+        grid.Settle();
+
+        Assert.Equal(0, grid.GetAllocatedSupply(producer));
+        Assert.Equal(Q16.Zero, grid.GetSatisfaction(consumer));
+    }
+
+    [Fact]
+    public void Settle_ClearsRegistrationsForNextTick()
+    {
+        var grid = GridWithOnePole();
+        var producer = new EntityId(1, 1); var consumer = new EntityId(2, 1);
+        grid.RegisterSupply(producer, 0, 0, UsagePriority.PrimaryOutput, 1000);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, 1000);
+        grid.Settle();
+        Assert.Equal(Q16.One, grid.GetSatisfaction(consumer));
+
+        grid.Settle();   // 没有新登记就结算 -> 上一轮的结果不应该继续生效
+        Assert.Equal(Q16.Zero, grid.GetSatisfaction(consumer));
+    }
 }
