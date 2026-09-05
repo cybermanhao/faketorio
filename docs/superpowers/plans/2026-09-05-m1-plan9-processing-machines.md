@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `a9ed5c4`..`0c93ac1`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Give the simulation a shared processing state machine for furnaces and assembling machines — recipe selection (furnace auto-matches, assembling machine needs an explicit `SetRecipe` command) → electricity check (registers demand, reads back satisfaction from `ElectricGrid`) → progress advance (throttled proportionally by satisfaction, frozen rather than reset when ingredients run short) → atomic all-or-nothing output placement → pending-output retry when the output is full.
 
 **Architecture:** `CraftingMachinePrototype` (abstract, `FurnacePrototype`/`AssemblingMachinePrototype` concrete) carries the static machine data. A new `Machines` class (flat `Faketorio.Sim` namespace — see Task 2's namespace-collision note) is a pure `Dictionary<EntityId, MachineRuntimeState>` runtime-state container, deliberately blind to `Simulation`/`Prototypes`/`Inventories` (same isolation discipline as `ElectricGrid`). `Inventories` grows a `role` parameter so one entity can own two independent inventories (machine input = role 1, output = role 2) without inventing a new storage type. `Simulation.MachinesTick()` is split into two full entity-pool scans — `MachinesTickPreSettle` (recipe selection + demand registration) and `MachinesTickPostSettle` (progress + completion) — bracketing `ElectricGrid.Settle()`, mirroring the existing fuel-generator register/settle/burn ordering.
