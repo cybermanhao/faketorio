@@ -1372,6 +1372,34 @@ public class SimulationTests
     }
 
     [Fact]
+    public void Inserter_OutOfFurnaceOutput_UsesRole2()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        // 机械臂(1,2)朝西(rotation 3):pickup = 身后(2,2) = 熔炉输出(role2);dropoff = 身前(0,2) = 箱
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 3));
+        sim.Submit(PlaceFurnace(sim, 2, 2));
+        sim.Step();
+
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        var furnaceId = sim.World.GetEntityAt(2, 2);
+        var furnaceOut = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));   // role 2 = output
+        var furnaceInput = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1)); // role 1 = input, never seeded
+        var dstInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        furnaceOut.Insert(plate, 3, plateStack);
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.True(dstInv.CountOf(plate) > 0);            // the inserter delivered items to the chest
+        Assert.True(furnaceOut.CountOf(plate) < 3);        // pulled from role 2 (output)
+        Assert.Equal(3, dstInv.CountOf(plate) + furnaceOut.CountOf(plate)); // conservation: nothing lost
+        Assert.Equal(0, furnaceInput.CountOf(plate));      // role 1 (input) never touched
+    }
+
+    [Fact]
     public void Inserter_DropoffBlocked_HoldsItemUntilSpaceFrees()
     {
         var sim = NewSim();
