@@ -90,4 +90,30 @@ public class InventoriesTests
         b.AddContainer(new EntityId(2, 1), 4);   // same inventory shape, different owner
         Assert.NotEqual(Hash(a), Hash(b));
     }
+
+    [Fact]
+    public void AddContainer_WithFilter_RejectsWrongItem_AcceptsRightItem()
+    {
+        var inv = new Inventories();
+        var id = inv.AddContainer(new EntityId(1, 1), 1, filterItemProtoId: 42);
+        var container = inv.Get(id);
+        Assert.Equal(0, container.Insert(7, 5, 50));    // wrong item -> rejected
+        Assert.Equal(5, container.Insert(42, 5, 50));   // right item -> accepted
+    }
+
+    [Fact]
+    public void AddContainer_ReadOnly_RejectsAllInserts()
+    {
+        var inv = new Inventories();
+        var id = inv.AddContainer(new EntityId(1, 1), 1, readOnly: true);
+        Assert.Equal(0, inv.Get(id).Insert(42, 5, 50));
+    }
+
+    [Fact]
+    public void AddContainer_DefaultArgs_Unfiltered_Writable()
+    {
+        var inv = new Inventories();
+        var id = inv.AddContainer(new EntityId(1, 1), 1);   // 现有单参数调用形态不变
+        Assert.Equal(5, inv.Get(id).Insert(42, 5, 50));
+    }
 }

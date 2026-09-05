@@ -9,6 +9,8 @@ public enum CommandType : byte
     MineStart = 5,
     MineStop = 6,
     CraftEnqueue = 7,
+    TransferToEntity = 8,
+    TransferFromEntity = 9,
 }
 
 public struct Command
@@ -18,4 +20,5 @@ public struct Command
     public int X;
     public int Y;
     public byte Rotation; // 0/1/2/3 = 北/东/南/西
+    public int Count;
 }

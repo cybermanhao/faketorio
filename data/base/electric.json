@@ -1,0 +1,6 @@
+[
+  { "type": "electric-pole", "name": "small-electric-pole", "tileWidth": 1, "tileHeight": 1,
+    "maximumWireDistanceTiles": 7, "supplyAreaDistanceTiles": 2 },
+  { "type": "fuel-generator", "name": "burner-generator", "tileWidth": 2, "tileHeight": 2,
+    "powerOutput": "90kW", "fuelItemName": "coal" }
+]
