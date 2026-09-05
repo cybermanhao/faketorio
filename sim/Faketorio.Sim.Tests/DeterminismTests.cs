@@ -1,4 +1,6 @@
 using Faketorio.Sim.Commands;
+using Faketorio.Sim.Electric;
+using Faketorio.Sim.Entities;
 using Faketorio.Sim.Prototypes;
 
 namespace Faketorio.Sim.Tests;
@@ -204,4 +206,34 @@ public class DeterminismTests
     [Fact]
     public void PlayerScenario_DifferentSeed_DifferentHash()
         => Assert.NotEqual(RunPlayerScenario(1), RunPlayerScenario(2));
+
+    private static List<ulong> RunElectricScenario(long seed)
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+        var hashes = new List<ulong>();
+        for (int t = 0; t < 30; t++)
+        {
+            if (t == 0)
+            {
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<ElectricPolePrototype>("small-electric-pole").Id, X = 0, Y = 0 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").Id, X = 2, Y = 0 });
+            }
+            if (t == 5)
+                sim.Submit(new Command { Type = CommandType.TransferToEntity, X = 2, Y = 0, ProtoId = coal, Count = 5 });
+            if (t >= 10)
+                sim.ElectricGrid.RegisterDemand(new EntityId(9999, 1), 0, 0, UsagePriority.PrimaryInput, 500);
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void ElectricScenario_SameSeedSameCommands_SameHashEveryTick()
+        => Assert.Equal(RunElectricScenario(4242), RunElectricScenario(4242));
 }
