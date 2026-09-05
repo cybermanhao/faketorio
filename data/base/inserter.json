@@ -1,0 +1,4 @@
+[
+  { "type": "inserter", "name": "inserter-basic", "tileWidth": 1, "tileHeight": 1,
+    "rotationTimeSeconds": 0.5, "energyUsage": "5kW" }
+]

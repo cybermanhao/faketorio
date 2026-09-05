@@ -21,6 +21,7 @@ public static class PrototypeLoader
         ResolveAndValidateElectric(registry);
         ResolveAndValidateCraftingMachines(registry);
         ResolveAndValidateMiningDrills(registry);
+        ResolveAndValidateInserters(registry);
         return registry;
     }
 
@@ -50,6 +51,21 @@ public static class PrototypeLoader
             if (registry.GetById(i) is not MiningDrillPrototype d) continue;
             if (d.EnergyUsageJPerTick < 0)
                 throw new InvalidDataException($"Mining drill '{d.Name}': energyUsage must be >= 0");
+        }
+    }
+
+    // AssignIds() 之后:校验机械臂字段。RotationSpeed 是真数据驱动的(不像 P9 CraftingSpeed /
+    // P10 MiningSpeed 那样恒 Q16.One),所以要校验:半程秒数太大导致 FromRatio(1, n) 取整成 0
+    // 的话,机械臂永远摆不完一个周期——这里兜住。
+    private static void ResolveAndValidateInserters(PrototypeRegistry registry)
+    {
+        for (int i = 0; i < registry.Count; i++)
+        {
+            if (registry.GetById(i) is not InserterPrototype ins) continue;
+            if (ins.EnergyUsageJPerTick < 0)
+                throw new InvalidDataException($"Inserter '{ins.Name}': energyUsage must be >= 0");
+            if (ins.RotationSpeed.Raw < 1)
+                throw new InvalidDataException($"Inserter '{ins.Name}': rotationTimeSeconds too large (rotation speed rounds to zero)");
         }
     }
 
@@ -305,6 +321,14 @@ public static class PrototypeLoader
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
                 EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var eu) ? Units.ParsePower(eu.GetString()!) : 0L,
+            }),
+            "inserter" => ValidateFootprint(new InserterPrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var eu) ? Units.ParsePower(eu.GetString()!) : 0L,
+                RotationSpeed = Q16.FromRatio(1, Math.Max(1, Units.SecondsToTicks(GetDouble(el, "rotationTimeSeconds", 1.0)))),
             }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
