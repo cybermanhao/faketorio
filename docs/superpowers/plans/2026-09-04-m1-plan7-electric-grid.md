@@ -761,10 +761,16 @@ Add `using Faketorio.Sim;` at the top (for `Q16`). Add fields and methods to `El
     public long GetAllocatedSupply(EntityId id) => _allocatedSupply.TryGetValue(id, out var v) ? v : 0;
     public Q16 GetSatisfaction(EntityId id) => _satisfaction.TryGetValue(id, out var v) ? v : Q16.Zero;
 
-    // 每 tick 调一次。每个网络独立结算,结果互不影响,故 _registrations 的
-    // 处理顺序不影响正确性;仍按 NetworkId.Index 排序处理,避免任何疑虑。
+    // 每 tick 调一次。先清空上一轮的结果——否则本 tick 没重新登记的实体会
+    // 读到上一轮的陈旧 allocated/satisfaction 而不是"未登记"的默认值 0/Zero
+    // (M1 里发电机每 tick 都会重新登记,不会踩到;但 ElectricGrid 独立测试
+    // 一旦某个实体某 tick 不登记,必须正确掉回默认值,不能读到旧数据)。
+    // 每个网络独立结算,结果互不影响,故 _registrations 的处理顺序不影响
+    // 正确性;仍按 NetworkId.Index 排序处理,避免任何疑虑。
     public void Settle()
     {
+        _allocatedSupply.Clear();
+        _satisfaction.Clear();
         var nets = new List<NetworkId>(_registrations.Keys);
         nets.Sort((a, b) => a.Index.CompareTo(b.Index));
         foreach (var net in nets)
