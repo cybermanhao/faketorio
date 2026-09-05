@@ -11,6 +11,10 @@ namespace Faketorio.Sim.Belts;
 // ExtendBack(入口侧) / ExtendFront(出口侧) 可原地增长长度,无需从头重建。
 public sealed class BeltLane
 {
+    // 一个物品在 lane 上的绝对前沿距离(离出口多远)+ 它是什么物品。
+    // 只在合并/拆分/存档这些冷路径上使用,不参与每 tick 的推进热路径。
+    public readonly record struct PositionedItem(int LeadingEdgeSubTiles, int ItemProtoId);
+
     // spec: 物品间距 0.25 tile = 64 亚格单位(每个物品占用的"槽宽")。
     public const int ItemWidthSubTiles = 64;
 
@@ -18,6 +22,7 @@ public sealed class BeltLane
     // _gaps[0] = 出口到最前物品前沿的距离;
     // _gaps[i](i>0) = 物品 i-1 后沿到物品 i 前沿的距离。
     private readonly List<int> _gaps = new();
+    private readonly List<int> _itemProtoIds = new();   // 与 _gaps 严格平行,同下标同物品
     private int _lineLengthSubTiles;
 
     // 摊还 O(1) 的关键游标。不变式:_openIndex ≤ 第一个非零 gap 的下标
@@ -56,11 +61,12 @@ public sealed class BeltLane
 
     // 在队尾(入口)插入一个新物品,新物品贴着 line 的入口边界进入。
     // 空间不足时返回 false,不改变任何状态。
-    public bool TryInsertAtBack()
+    public bool TryInsertAtBack(int itemProtoId)
     {
         int free = BackFreeSubTiles();
         if (free < ItemWidthSubTiles) return false;
         _gaps.Add(free - ItemWidthSubTiles);
+        _itemProtoIds.Add(itemProtoId);
         return true;
     }
 
@@ -97,6 +103,9 @@ public sealed class BeltLane
     // 臂/建筑输入口——移交逻辑本身在后续接入 Simulation 的计划中实现)。
     public bool IsFrontReady => _gaps.Count > 0 && _gaps[0] == 0;
 
+    // 队首物品的类型(只读,不摘除)。前置:IsFrontReady == true(同 RemoveFront 的前置)。
+    public int FrontItemProtoId => _itemProtoIds[0];
+
     // 移除队首物品(调用前必须已确认 IsFrontReady)。它腾出的空间并入新
     // 队首的前方 gap;_openIndex 重置为 0,因为后面的物品可能因此重新有
     // 空间前进。
@@ -105,6 +114,7 @@ public sealed class BeltLane
         if (!IsFrontReady)
             throw new InvalidOperationException("RemoveFront called when front is not ready");
         _gaps.RemoveAt(0);
+        _itemProtoIds.RemoveAt(0);
         if (_gaps.Count > 0)
             _gaps[0] += ItemWidthSubTiles;
         _openIndex = 0;
@@ -159,32 +169,32 @@ public sealed class BeltLane
         if (_gaps.Count > 0) _gaps[0] -= subtiles;
     }
 
-    // 把相对 gap 列表转成"每个物品前沿距出口的绝对亚格距离"(前到后)。
+    // 把相对 gap 列表转成"每个物品前沿距出口的绝对亚格距离 + 物品类型"(前到后)。
     // 冷路径(合并/拆分/存档),一次线性扫描,允许分配。
-    public IReadOnlyList<int> ToAbsolutePositions()
+    public IReadOnlyList<PositionedItem> ToAbsolutePositions()
     {
-        var result = new int[_gaps.Count];
+        var result = new PositionedItem[_gaps.Count];
         int pos = 0;
         for (int i = 0; i < _gaps.Count; i++)
         {
             pos += _gaps[i];
-            result[i] = pos;
+            result[i] = new PositionedItem(pos, _itemProtoIds[i]);
             pos += ItemWidthSubTiles;
         }
         return result;
     }
 
-    // 从"前沿绝对距离"列表(前到后、升序)和总长度重建一条新 lane。
+    // 从"前沿绝对距离 + 物品类型"列表(前到后、升序)和总长度重建一条新 lane。
     // _openIndex 取默认 0(唯一恒安全的初值,不沿用来源 lane 的游标)。
     // 相邻前沿差 < ItemWidthSubTiles 视为物品重叠(上游 bug),fail-fast。
-    public static BeltLane FromAbsolutePositions(int lineLength, IReadOnlyList<int> positions)
+    public static BeltLane FromAbsolutePositions(int lineLength, IReadOnlyList<PositionedItem> positions)
     {
         ArgumentNullException.ThrowIfNull(positions);
         var lane = new BeltLane(lineLength); // 长度非法时构造函数抛 ArgumentOutOfRangeException
         int prevTrailingEdge = 0;
         for (int i = 0; i < positions.Count; i++)
         {
-            int leadingEdge = positions[i];
+            int leadingEdge = positions[i].LeadingEdgeSubTiles;
             int gap = leadingEdge - prevTrailingEdge;
             if (gap < 0)
                 throw new ArgumentException(
@@ -193,6 +203,7 @@ public sealed class BeltLane
                         : $"position[{i}]={leadingEdge} overlaps previous item (gap {gap})",
                     nameof(positions));
             lane._gaps.Add(gap);
+            lane._itemProtoIds.Add(positions[i].ItemProtoId);
             prevTrailingEdge = leadingEdge + ItemWidthSubTiles;
         }
         if (prevTrailingEdge > lineLength)
@@ -225,6 +236,7 @@ public sealed class BeltLane
         if (removeAt + 1 < _gaps.Count)
             _gaps[removeAt + 1] += _gaps[removeAt] + ItemWidthSubTiles;
         _gaps.RemoveAt(removeAt);
+        _itemProtoIds.RemoveAt(removeAt);
 
         if (removeAt <= _openIndex)
             _openIndex = removeAt;
@@ -236,7 +248,7 @@ public sealed class BeltLane
         return true;
     }
 
-    // 规范序列化(spec 铁律 4):只写 gap 数量与 gap 列表。
+    // 规范序列化(spec 铁律 4):写 gap 数量,然后逐个物品写 (gap, 物品 id)。
     // 不写 _openIndex / TouchesInLastAdvance——两者纯派生:加载后 _openIndex
     // 归 0,下一次 Advance 多扫一趟即自愈,最终 gap 轨迹与状态哈希不受影响。
     // 线长不在这里写:BeltLine.WriteState 会写 Tiles 数量(线长 = 256 × 格数)。
@@ -244,6 +256,9 @@ public sealed class BeltLane
     {
         writer.Write(_gaps.Count);
         for (int i = 0; i < _gaps.Count; i++)
+        {
             writer.Write(_gaps[i]);
+            writer.Write(_itemProtoIds[i]);
+        }
     }
 }

@@ -66,6 +66,7 @@ public class DeterminismTests
     {
         var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"));
         int belt = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id;
+        int beltTestItem = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
         var hashes = new List<ulong>();
         for (int t = 0; t < 60; t++)
         {
@@ -78,8 +79,8 @@ public class DeterminismTests
             if (t >= 6 && t % 12 == 6)
             {
                 var line = sim.Belts.GetLine(sim.Belts.GetLineAt(0, 0));
-                line.LaneA.TryInsertAtBack();
-                line.LaneB.TryInsertAtBack();
+                line.LaneA.TryInsertAtBack(beltTestItem);
+                line.LaneB.TryInsertAtBack(beltTestItem);
             }
             sim.Step();
             hashes.Add(sim.ComputeStateHash());

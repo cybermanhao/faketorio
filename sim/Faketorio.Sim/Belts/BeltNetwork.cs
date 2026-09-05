@@ -206,26 +206,28 @@ public sealed class BeltNetwork
 
     // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
     // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
+    // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
+    // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
     private static BeltLane SplitBackLane(BeltLane src, int cut, int backLen)
     {
-        var back = new List<int>();
-        foreach (int p in src.ToAbsolutePositions())
-            if (p >= cut) back.Add(p - cut);
+        var back = new List<BeltLane.PositionedItem>();
+        foreach (var p in src.ToAbsolutePositions())
+            if (p.LeadingEdgeSubTiles >= cut) back.Add(p with { LeadingEdgeSubTiles = p.LeadingEdgeSubTiles - cut });
         return BeltLane.FromAbsolutePositions(backLen, back);
     }
 
     // 把 up(上游,拼在物理后侧)与 down(下游,拼在出口侧)两条带物品的
     // lane 拼成一条长 combinedLen 的新 lane。前沿绝对距离:down 的原样,
-    // up 的每项整体后移 (256 + downLen)——越过新格 T 和整条 down。
-    // 拼出的列表天然升序(up 最靠前项移位后仍远在 down 最靠后项之后),
-    // 直接交给 FromAbsolutePositions。
+    // up 的每项整体后移 (256 + downLen)——越过新格 T 和整条 down。物品
+    // 类型原样带过去,不参与位置计算。拼出的列表天然升序(up 最靠前项移位后
+    // 仍远在 down 最靠后项之后),直接交给 FromAbsolutePositions。
     private static BeltLane ConcatLanes(BeltLane up, BeltLane down, int downLen, int combinedLen)
     {
-        var pos = new List<int>(down.Count + up.Count);
+        var pos = new List<BeltLane.PositionedItem>(down.Count + up.Count);
         pos.AddRange(down.ToAbsolutePositions());
         int shift = BeltLine.TileSubTiles + downLen;
-        foreach (int p in up.ToAbsolutePositions())
-            pos.Add(p + shift);
+        foreach (var p in up.ToAbsolutePositions())
+            pos.Add(p with { LeadingEdgeSubTiles = p.LeadingEdgeSubTiles + shift });
         return BeltLane.FromAbsolutePositions(combinedLen, pos);
     }
 

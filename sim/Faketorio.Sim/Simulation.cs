@@ -90,8 +90,8 @@ public sealed class Simulation
             if (!downId.IsValid) continue;
             var down = Belts.GetLine(downId);
             if (down.Tiles[^1] != (fx, fy)) continue;
-            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack()) line.LaneA.RemoveFront();
-            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack()) line.LaneB.RemoveFront();
+            while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack(line.LaneA.FrontItemProtoId)) line.LaneA.RemoveFront();
+            while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack(line.LaneB.FrontItemProtoId)) line.LaneB.RemoveFront();
         }
         Tick++;
     }
