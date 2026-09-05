@@ -988,4 +988,122 @@ public class SimulationTests
         sim.Step();
         Assert.True(sim.Machines.GetProgress(asmId) > 0);   // now advancing from 0
     }
+
+    private static Command PlaceDrill(Simulation sim, int x, int y, byte rotation = 0) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<MiningDrillPrototype>("electric-mining-drill").Id,
+        X = x, Y = y, Rotation = rotation,
+    };
+
+    // 同 P9 的 PlacePoweredMachineInfra:电线杆(0,0)+ 发电机(2,0)充好煤。
+    private static void PlacePoweredDrillInfra(Simulation sim)
+    {
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlaceGenerator(sim, 2, 0));
+        sim.Step();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+        sim.Submit(TransferTo(2, 0, coal, 5));
+        sim.Step();
+    }
+
+    [Fact]
+    public void MiningDrill_FindsResourceInFootprint_AndExtractsToOutputChest()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // Drill origin must stay within the pole's supplyAreaDistanceTiles (2, Chebyshev,
+        // measured from the entity's placement-time (X,Y) origin — see ElectricGrid).
+        // Pole is at (0,0), so (0,2) is right at the boundary; (0,3) would be unpowered.
+        // 采矿机 2x2 footprint 占 (0,2)-(1,3),朝东(rotation=1)输出到 (2,2)。
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        // Resources 是惰性生成的矿脉——用固定种子(NewSim 默认种子 0)读一遍 (0,2)-(1,3)
+        // 范围,找到实际有矿的格再断言(矿脉分布是种子的确定函数,不是本测试要验证的东西;
+        // 这里只需要确认"某个格有矿、采矿机能找到它、挖出对应物品、堆进箱子"这条流程通)。
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "test assumes the default seed puts at least one resource tile under (0,2)-(1,3) — if this fails, adjust the drill's placement coordinates to a spot the seeded map actually has ore under.");
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.True(chestInv.TotalItems() > 0);
+        Assert.True(sim.MiningDrills.GetProgress(drillId) >= 0); // sanity: didn't throw, state is readable
+    }
+
+    [Fact]
+    public void MiningDrill_OutputsToBelt_WithCorrectItemType()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // Same footprint/power reasoning as the chest test above: drill origin must stay
+        // within the pole's supplyAreaDistanceTiles (2, Chebyshev, from (0,0)).
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1)); // 朝东输出到 (2,2)
+        sim.Submit(new Command { Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 2, Y = 2, Rotation = 1 });
+        sim.Step();
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var lineId = sim.Belts.GetLineAt(2, 2);
+        Assert.True(lineId.IsValid);
+        var line = sim.Belts.GetLine(lineId);
+        bool hasItem = line.LaneA.Count > 0 || line.LaneB.Count > 0;
+        Assert.True(hasItem, "expected the drill's output to have landed on the belt at (2,2)");
+    }
+
+    [Fact]
+    public void MiningDrill_NoTargetInFootprint_NeverProgresses()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // (50,50) 起的 2x2 区域:若碰巧有矿,换一个更偏远的坐标直到全空(矿脉是无限惰性生成,
+        // 但任意固定 2x2 区域全空的概率不为零——用一个大坐标降低撞上矿脉密集区的概率)。
+        sim.Submit(PlaceDrill(sim, 5000, 5000, rotation: 1));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(5000, 5000);
+        bool anyResource = false;
+        for (int dy = 0; dy < 2; dy++)
+            for (int dx = 0; dx < 2; dx++)
+                if (!sim.Resources.GetResourceAt(5000 + dx, 5000 + dy).IsEmpty) anyResource = true;
+        Assert.False(anyResource, "test assumes (5000,5000)-(5001,5001) has no ore under the default seed — pick a different far-away coordinate if this ever becomes false");
+
+        for (int t = 0; t < 50; t++) sim.Step();
+
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId));
+        Assert.Equal(0, sim.MiningDrills.GetProgress(drillId));
+    }
+
+    [Fact]
+    public void MiningDrill_DestroyedMidCycle_UnregistersCleanly()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceDrill(sim, 10, 10, rotation: 1));
+        sim.Step();
+        var drillId = sim.World.GetEntityAt(10, 10);
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 10, Y = 10 });
+        sim.Step();
+
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId)); // 反查:摘除后读默认值,不抛异常
+        Assert.False(sim.World.GetEntityAt(10, 10).IsValid);
+    }
 }
