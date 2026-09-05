@@ -30,7 +30,7 @@
 | 文件 | 改动 |
 |---|---|
 | `sim/Faketorio.Sim/Belts/BeltLane.cs` | ① `TryRemoveItemInRange` 加 `out int removedItemProtoId` 参数(现有 P3c `BeltNetwork.ClearRange` 调用点传 `out _`)。② 新增 `bool TryInsertAt(int leadingEdgeSubTile, int itemProtoId)`——在 lane 的绝对位置中段插入一个物品,和邻近物品重叠 / 超出线长 / 位置为负 → 返回 false 不改状态。 |
-| `sim/Faketorio.Sim/Belts/BeltNetwork.cs` | `ClearRange` 里 `while (lane.TryRemoveItemInRange(from, to))` 改成 `while (lane.TryRemoveItemInRange(from, to, out _))`。无其它改动。 |
+| `sim/Faketorio.Sim/Belts/BeltNetwork.cs` | `TryRemoveItemInRange` 的三处调用点(`ClearRange` 一处、`MiddleSplit` 两处)都加 `out _`。无其它改动。 |
 | `sim/Faketorio.Sim/Prototypes/PrototypeLoader.cs` | `Parse` 加 `"inserter"` arm(走 `ValidateFootprint<T>`);新 sibling pass `ResolveAndValidateInserters`(第六个,不并入前五个)。 |
 | `sim/Faketorio.Sim/Simulation.cs` | `Inserters` 属性;`PlaceEntity`/`DestroyEntityAt` 给机械臂接入/摘出;`Step` 在 P10 采矿机两趟之后插入机械臂两趟;`WriteState` 追加 `Inserters.WriteState`。 |
 
@@ -62,7 +62,7 @@ public bool TryRemoveItemInRange(int fromSubTile, int toSubTile, out int removed
 }
 ```
 
-`BeltNetwork.cs` 里唯一的调用点在 `ClearRange`(P3c 拆传送带用,只数个数不关心类型):`while (lane.TryRemoveItemInRange(from, to)) c++;` → `while (lane.TryRemoveItemInRange(from, to, out _)) c++;`。
+`BeltNetwork.cs` 里三处调用点(`ClearRange` 一处 + `MiddleSplit` 两处,P3c 拆传送带用,只数个数不关心类型)都加 `out _`,例:`while (lane.TryRemoveItemInRange(from, to)) c++;` → `while (lane.TryRemoveItemInRange(from, to, out _)) c++;`。
 
 ### 3.2 新增 `TryInsertAt`
 
