@@ -82,8 +82,10 @@ int TargetRoleFor(CommandType cmdType, EntityPrototype proto) => proto switch
 
 ## 5. `Machines` 子系统:每机器运行时状态
 
+**命名空间坑(同 P5 `Player` 先例)**:类名 `Machines` 若放进 `namespace Faketorio.Sim.Machines`,在 `Simulation.cs`(`namespace Faketorio.Sim`)里裸写 `Machines` 会被 C# 解析成命名空间段而不是类型——P5 的 `Player` 就是同一个坑(`namespace Faketorio.Sim.Player` 里的 `class Player` 自我遮蔽)。照搬当时的修法:类放**扁平** `namespace Faketorio.Sim;`,`Machines/` 目录只作物理文件组织,不对应真实命名空间。
+
 ```csharp
-namespace Faketorio.Sim.Machines;
+namespace Faketorio.Sim;   // 扁平——不是 Faketorio.Sim.Machines,理由见上
 
 public sealed class Machines
 {
