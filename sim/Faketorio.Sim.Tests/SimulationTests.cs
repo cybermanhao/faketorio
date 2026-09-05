@@ -1,5 +1,6 @@
 using Faketorio.Sim.Belts;
 using Faketorio.Sim.Commands;
+using Faketorio.Sim.Electric;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Items;
 using Faketorio.Sim.Prototypes;
@@ -564,5 +565,101 @@ public class SimulationTests
         for (int t = 0; t < chestEnergy + 2; t++) sim.Step();
         Assert.Equal(chestBefore + 2, sim.Player.Inventory.CountOf(chestItem));
         Assert.Equal(plateBefore - 2, sim.Player.Inventory.CountOf(plate));
+    }
+
+    private static Command PlacePole(Simulation sim, int x, int y) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<ElectricPolePrototype>("small-electric-pole").Id,
+        X = x, Y = y, Rotation = 0,
+    };
+
+    private static Command PlaceGenerator(Simulation sim, int x, int y) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").Id,
+        X = x, Y = y, Rotation = 0,
+    };
+
+    private static Command TransferTo(int x, int y, int itemId, int count) => new()
+        { Type = CommandType.TransferToEntity, X = x, Y = y, ProtoId = itemId, Count = count };
+
+    [Fact]
+    public void PlaceTwoPoles_WithinRange_SameNetwork()
+    {
+        var sim = NewSim();
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlacePole(sim, 5, 0));
+        sim.Step();
+        Assert.Equal(sim.ElectricGrid.FindNetworkAt(0, 0), sim.ElectricGrid.FindNetworkAt(5, 0));
+    }
+
+    [Fact]
+    public void RemovePole_LeavesTheOtherPoleAlone()
+    {
+        var sim = NewSim();
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlacePole(sim, 6, 0));
+        sim.Step();
+        Assert.Equal(sim.ElectricGrid.FindNetworkAt(0, 0), sim.ElectricGrid.FindNetworkAt(6, 0));
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 0, Y = 0 });
+        sim.Step();
+        Assert.False(sim.ElectricGrid.FindNetworkAt(0, 0).IsValid);
+        Assert.True(sim.ElectricGrid.FindNetworkAt(6, 0).IsValid);
+    }
+
+    [Fact]
+    public void TransferToEntity_FillsGeneratorFuelSlot()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        sim.Player.Inventory.Insert(coal, 5, sim.Prototypes.Get<ItemPrototype>("coal").StackSize);
+        sim.Submit(PlaceGenerator(sim, 0, 0));
+        sim.Step();
+        sim.Submit(TransferTo(0, 0, coal, 3));
+        sim.Step();
+
+        var genId = sim.World.GetEntityAt(0, 0);
+        var fuelInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(genId));
+        Assert.Equal(3, fuelInv.CountOf(coal));
+    }
+
+    [Fact]
+    public void TransferToEntity_OutOfReach_IsRejected()
+    {
+        var sim = NewSim();
+        sim.Player.Inventory.Insert(sim.Prototypes.Get<ItemPrototype>("coal").Id, 5, 50);
+        sim.Submit(PlaceChest(sim, 20, 0));
+        sim.Step();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        sim.Submit(TransferTo(20, 0, coal, 1));
+        sim.Step();
+        Assert.Equal(1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void GeneratorWithFuel_PowersManuallyRegisteredDemand_BurnsProportionally()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlaceGenerator(sim, 2, 0));   // Chebyshev distance 2 <= pole's supplyAreaDistanceTiles 2
+        sim.Step();
+        sim.Submit(TransferTo(2, 0, coal, 5));
+        sim.Step();
+
+        var genId = sim.World.GetEntityAt(2, 0);
+        long powerPerTick = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").PowerOutputJPerTick;
+        var fakeConsumer = new EntityId(999, 1);
+
+        sim.ElectricGrid.RegisterDemand(fakeConsumer, 0, 0, UsagePriority.PrimaryInput, powerPerTick / 2);
+        sim.Step();   // Step 内:发电机登记供给(此时已有煤)-> Settle(与上面手动登记的需求一起结算)-> 烧油
+
+        Assert.Equal(Q16.One, sim.ElectricGrid.GetSatisfaction(fakeConsumer));
+        Assert.True(sim.ElectricGrid.GetFuelBufferJ(genId) > 0);   // 只烧了一半,缓冲还有剩(一块煤够很多 tick)
     }
 }
