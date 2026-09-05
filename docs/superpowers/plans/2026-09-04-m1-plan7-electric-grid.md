@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `f058345`..`bc9c8ae`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Add an electrical grid to the simulation — pole connectivity (full recompute), Chebyshev supply-area coverage resolved by position query, a per-network per-tick settlement across the six `UsagePriority` tiers (M1 exercises only `PrimaryOutput`/`PrimaryInput`), and a fuel generator that burns exactly its allocated share. Ships alongside a generic player↔entity item-transfer command reused for fuel loading.
 
 **Architecture:** `ElectricGrid` is a standalone object (parallel to `ResourceGrid`/`Inventories`) that knows nothing about `Simulation`/`Entities`/`Prototypes` — poles register themselves by raw position, and it answers `FindNetworkAt(x,y)` by walking a lazily-rebuilt (dirty-flag-gated) union-find over registered poles. Producers/consumers (in M1: only the fuel generator, driven from `Simulation`'s per-tick scan of the entity pool — mirroring how belts are scanned) register supply/demand against a network id resolved from their own position, then read back an allocation/satisfaction after `Settle()`. The fuel generator's only persistent state (`_fuelBufferJ`, an energy accumulator) lives inside `ElectricGrid` and is the only thing `WriteState` serializes — the pole graph and the per-tick settlement results are pure derived data, recomputed every tick or on topology change, never persisted.

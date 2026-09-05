@@ -6,7 +6,7 @@
 
 ## 进度快照(2026-09-04,更新)
 
-`main` HEAD `a5f569d`;`dotnet test sim/Faketorio.Sim.Tests` = **276 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+`main` HEAD `bc9c8ae`;`dotnet test sim/Faketorio.Sim.Tests` = **309 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
 
 | 子项目 | 状态 | 主线提交(合并后) |
 |---|---|---|
@@ -19,8 +19,7 @@
 | **P4** 库存(ItemStack + Inventory + InventoryPool + Inventories 接线) | ✅ 已合并·已验证 | `55539e8`..`58f65f1` |
 | **P6** 矿脉生成(DeterministicHash + ValueNoise + ResourceGrid + seed 接线) | ✅ 已合并·已验证 | `f45232b`..`ee36c52` |
 | **P5** 玩家实体 + 位置 + MovePlayer + 玩家背包 + HandMine + HandCraft + 开局物资包 | ✅ 已合并·已验证 | `2ad2b1f`..`a5f569d` |
-| **P7** 电网(电线杆连通分量 + supply_area + 每 tick 每网结算 + 缺电降速 + satisfaction) | ⬜ 未开始 | — |
-| **P8** 燃料发电机(Burner 入 + Electric primary-output 出) | ⬜ 未开始(可并入 P7) | — |
+| **P7** 电网(电线杆连通分量 + supply_area + 每 tick 每网结算 + 缺电降速 + satisfaction + 燃料发电机,P8 并入本项) | ✅ 已合并·已验证 | `f058345`..`bc9c8ae` |
 | **P9** 加工状态机(熔炉 + 装配机共用) | ⬜ 未开始 | — |
 | **P10** 电力采矿机 | ⬜ 未开始 | — |
 | **P11** 机械臂(belt lane ↔ inventory 抓/放) | ⬜ 未开始 | — |
@@ -29,9 +28,9 @@
 | 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项(等 P9 有机器状态) | — |
 | 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ⬜ 未立项 · **建议 P7/P9 前立最小回归基线**(当前仓库无 CI / 无基准项目) | — |
 
-完成度分层看:M1 模拟基础设施 + 首个可玩闭环片段 ≈ P1–P6 已落地(挖矿→手搓→存储,手动部分打通,但还没有电力);电力 / 机器加工 / 电力采矿机 / 机械臂未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。P5 执行期确认:typed belt items 不必卡在 P5 前(手挖只碰玩家背包,不碰传送带),但仍不能晚于 P10。
+完成度分层看:M1 模拟基础设施 + 首个可玩闭环片段 ≈ P1–P7 已落地(挖矿→手搓→存储→电力,手动部分与电力全部打通);机器加工 / 电力采矿机 / 机械臂未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。P5 执行期确认:typed belt items 不必卡在 P5 前(手挖只碰玩家背包,不碰传送带),但仍不能晚于 P10。P7 执行期确认:发电机结算的多生产者取整用 Hamilton(最大余数法)分配以保证守恒且不超容量;`TransferFromEntity` 的搬回逻辑改为搬移前按目标容量夹紧,避免 readOnly 库存下的物品消失(P9 机器输出槽是 readOnly 库存的典型场景,此修复先于其落地)。
 
-下一步:**P7 电网**——它不依赖库存,可独立于任何机器推进;是 P9(加工状态机)和 P10(电力采矿机)的共同前置。
+下一步:**P9 加工状态机**(熔炉 + 装配机共用)——依赖已就绪的 P4 库存 + P7 电网,是本系列下一个自然衔接点;P10(电力采矿机)另外还需 P6,可与 P9 并行推进。
 
 ## 0. 背景
 
