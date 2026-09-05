@@ -217,15 +217,7 @@ Tick++
 
 （`energyUsage` 复用 P7 已有的 `Units.ParsePower` 解析成 `EnergyUsageJPerTick`,同 `fuel-generator` 的 `powerOutput` 字段解析方式。）
 
-新增一条 `smelting` 分类配方(`data/base/recipes.json` 追加):
-
-```json
-{ "type": "recipe", "name": "iron-plate-smelting", "category": "smelting", "energyRequiredSeconds": 3.5,
-  "ingredients": [ { "name": "iron-ore", "amount": 1 } ],
-  "results": [ { "name": "iron-plate", "amount": 1 } ] }
-```
-
-不改动现有 `iron-plate`(`category: "crafting"`,手搓专用,`PlayerCraft` 继续用它)——熔炉用新的 `smelting` 分类配方,两条配方产物相同、分类不同,互不干扰。`iron-gear-wheel`/`wooden-chest`(`crafting` 分类)留给装配机测试用(`SetRecipe` 指向其一)。
+**不新增配方**——`data/base/recipes.json` 里的 `iron-plate` 配方本来就是 `category: "smelting"`(`energyRequiredSeconds: 3.2` → 192 ticks),这是 P5 就已经埋好的伏笔:`CraftEnqueue`(`Simulation.cs` Apply,`recipe.Category != "crafting"` 直接拒绝)从一开始就不接受这条配方,玩家永远无法手搓出 `iron-plate`;`player.json` 的开局物资包直接给 8 个 `iron-plate`(不是矿+配方),原因正是"这条配方要等熔炉才能跑"。P9 熔炉直接吃这条现成配方,不需要新建。`iron-gear-wheel`/`wooden-chest`(`crafting` 分类)留给装配机测试用(`SetRecipe` 指向其一,原料是 `iron-plate`——玩家开局自带的 8 个,或熔炉产出的都行)。
 
 ## 9. 确定性
 
@@ -252,7 +244,7 @@ Tick++
 
 ## 11. 实施拆分
 
-- **Task 1**:`CraftingMachinePrototype`/`FurnacePrototype`/`AssemblingMachinePrototype` + `PrototypeLoader` 解析(两个 type + `ResolveAndValidateCraftingMachines`)+ `data/base/machines.json` + `data/base/recipes.json` 追加 `iron-plate-smelting` + `Inventories` 的 `role` 参数改造(`AddContainer`/`GetInventoryId`/`RemoveContainer`/`WriteState`)+ loader/`Inventories` 测试。不碰 `Simulation`。
+- **Task 1**:`CraftingMachinePrototype`/`FurnacePrototype`/`AssemblingMachinePrototype` + `PrototypeLoader` 解析(两个 type + `ResolveAndValidateCraftingMachines`)+ `data/base/machines.json` + `Inventories` 的 `role` 参数改造(`AddContainer`/`GetInventoryId`/`RemoveContainer`/`WriteState`)+ loader/`Inventories` 测试。不碰 `Simulation`,不改 `recipes.json`(§8:`iron-plate` 配方已经是 `smelting` 分类,现成可用)。
 - **Task 2**:`Machines` 子系统(`RegisterMachine`/`UnregisterMachine`/`SetRecipe`/进度读写/`WriteState`)+ `MachinesTests`。不碰 `Simulation`。
 - **Task 3**:`Command.SetRecipe` + `Simulation.MachinesTick()`(两趟扫描,§6 全部步骤)+ `Simulation` 接线(`Machines` 属性、`PlaceEntity`/`DestroyEntityAt` 钩子、`Step` 加工段、`WriteState` 追加、`Apply` 的 `SetRecipe` case、`TransferToEntity`/`FromEntity` 的 role 分派)+ `SimulationTests` + `DeterminismTests`。
 
