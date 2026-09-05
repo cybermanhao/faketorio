@@ -25,6 +25,7 @@ public sealed class Simulation
     public ElectricGrid ElectricGrid { get; } = new();
     public Machines Machines { get; } = new();
     public MiningDrills MiningDrills { get; } = new();
+    public Inserters Inserters { get; } = new();
 
     private readonly long _worldSeed;
     private readonly PlayerPrototype _playerProto;
@@ -68,10 +69,12 @@ public sealed class Simulation
         ElectricGeneratorsRegisterSupply();
         MachinesTickPreSettle();
         MiningDrillsTickPreSettle();
+        InsertersTickPreSettle();
         ElectricGrid.Settle();
         ElectricGeneratorsBurnFuel();
         MachinesTickPostSettle();
         MiningDrillsTickPostSettle();
+        InsertersTickPostSettle();
 
         // 传送带:推进(按 Belts 池索引序,确定)
         for (int bi = 0; bi < Belts.Capacity; bi++)
@@ -149,6 +152,7 @@ public sealed class Simulation
         ElectricGrid.WriteState(writer);
         Machines.WriteState(writer);
         MiningDrills.WriteState(writer);
+        Inserters.WriteState(writer);
     }
 
     private void PlayerWalk()
@@ -306,6 +310,8 @@ public sealed class Simulation
                 }
                 if (proto is MiningDrillPrototype)
                     MiningDrills.RegisterDrill(id);
+                if (proto is InserterPrototype)
+                    Inserters.RegisterInserter(id);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -459,6 +465,7 @@ public sealed class Simulation
         bool isGenerator = proto is FuelGeneratorPrototype;
         bool isMachine = proto is CraftingMachinePrototype;
         bool isDrill = proto is MiningDrillPrototype;
+        bool isInserter = proto is InserterPrototype;
         World.ClearArea(data.X, data.Y, proto.TileWidth, proto.TileHeight);
         Entities.Destroy(id);
         if (isBelt) Belts.RemoveBelt(bx, by);
@@ -476,6 +483,7 @@ public sealed class Simulation
             Machines.UnregisterMachine(id);
         }
         if (isDrill) MiningDrills.UnregisterDrill(id);
+        if (isInserter) Inserters.UnregisterInserter(id);
     }
 
     // 扫实体池找发电机(同 belt 推进/WriteState 的索引序扫法,不给 ElectricGrid
@@ -737,5 +745,117 @@ public sealed class Simulation
         var itemProto = Prototypes.Get<ItemPrototype>(resProto.MinableResult);
         Resources.Extract(tx, ty, 1);
         MiningDrills.MarkCompleted(id, itemProto.Id);
+    }
+
+    // 机械臂:电力需求登记(Settle() 之前)。两趟扫描的第一趟。机械臂没有"匹配 / 搜目标"
+    // 那种 pre-settle 工作,只登记恒定待机能耗。
+    private void InsertersTickPreSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+        }
+    }
+
+    // 机械臂:三阶段摆臂状态机(Settle() 之后,可读 satisfaction;在传送带推进之前——
+    // 机械臂看到的是本 tick 开头的传送带状态)。两趟扫描的第二趟。
+    private void InsertersTickPostSettle()
+    {
+        for (int i = 0; i < Entities.Capacity; i++)
+        {
+            if (!Entities.IsAliveAtIndex(i)) continue;
+            ref var data = ref Entities.GetAtIndex(i);
+            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
+            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            InserterTickPostSettle(id, proto, data.X, data.Y, data.Rotation);
+        }
+    }
+
+    private void InserterTickPostSettle(EntityId id, InserterPrototype proto, int x, int y, byte rotation)
+    {
+        var (dx, dy) = BeltNetwork.Delta(rotation);
+        int pickX = x - dx, pickY = y - dy;   // 身后
+        int dropX = x + dx, dropY = y + dy;   // 身前
+        int held = Inserters.GetHeldItemProtoId(id);
+        long progress = Inserters.GetSwingProgress(id);
+        long delta = proto.RotationSpeed.Mul(ElectricGrid.GetSatisfaction(id).Raw);
+
+        // 阶段 A:空手停在抓取角 —— 尝试抓
+        if (held == 0 && progress == 0)
+        {
+            var pickLineId = Belts.GetLineAt(pickX, pickY);
+            if (pickLineId.IsValid)
+            {
+                var line = Belts.GetLine(pickLineId);
+                int k = line.Tiles.IndexOf((pickX, pickY));
+                int from = k * BeltLine.TileSubTiles - (BeltLane.ItemWidthSubTiles - 1);
+                int to = (k + 1) * BeltLine.TileSubTiles;
+                if (line.LaneA.TryRemoveItemInRange(from, to, out int grabbedA)) Inserters.Grab(id, grabbedA);
+                else if (line.LaneB.TryRemoveItemInRange(from, to, out int grabbedB)) Inserters.Grab(id, grabbedB);
+            }
+            else
+            {
+                var pickEntity = World.GetEntityAt(pickX, pickY);
+                int role = pickEntity.IsValid
+                    && Prototypes.TryGetById(Entities.Get(pickEntity).ProtoId, out var pp)
+                    && pp is CraftingMachinePrototype ? 2 : 0;
+                var invId = pickEntity.IsValid ? Inventories.GetInventoryId(pickEntity, role) : InventoryId.Invalid;
+                if (invId.IsValid)
+                {
+                    var inv = Inventories.Get(invId);
+                    for (int s = 0; s < inv.SlotCount; s++)
+                    {
+                        if (inv[s].IsEmpty) continue;
+                        int itemId = inv[s].ItemProtoId;
+                        inv.Remove(itemId, 1);
+                        Inserters.Grab(id, itemId);
+                        break;
+                    }
+                }
+            }
+            return;   // 抓到就进阶段 B(下 tick);抓不到就下 tick 再试
+        }
+
+        // 阶段 B:往外摆,拿着物品 —— 推进到 HalfSwing 后尝试放
+        if (held != 0)
+        {
+            if (progress < Inserters.HalfSwing) Inserters.AddSwing(id, delta);
+            if (Inserters.GetSwingProgress(id) < Inserters.HalfSwing) return;   // 还没摆到放置角(停在阈值)
+
+            bool released = false;
+            var dropLineId = Belts.GetLineAt(dropX, dropY);
+            if (dropLineId.IsValid)
+            {
+                var line = Belts.GetLine(dropLineId);
+                int k = line.Tiles.IndexOf((dropX, dropY));
+                int pos = k * BeltLine.TileSubTiles + BeltLine.TileSubTiles / 2;   // 格中心
+                released = line.LaneA.TryInsertAt(pos, held) || line.LaneB.TryInsertAt(pos, held);
+            }
+            else
+            {
+                var dropEntity = World.GetEntityAt(dropX, dropY);
+                int role = dropEntity.IsValid
+                    && Prototypes.TryGetById(Entities.Get(dropEntity).ProtoId, out var dp)
+                    && dp is CraftingMachinePrototype ? 1 : 0;
+                var invId = dropEntity.IsValid ? Inventories.GetInventoryId(dropEntity, role) : InventoryId.Invalid;
+                if (invId.IsValid)
+                {
+                    int stack = ((ItemPrototype)Prototypes.GetById(held)).StackSize;
+                    released = Inventories.Get(invId).Insert(held, 1, stack) > 0;
+                }
+            }
+            if (released) Inserters.Release(id);
+            // 放不下 → 不 Release,手一直拿着,进度停在 HalfSwing 附近,下 tick 再试放
+            return;
+        }
+
+        // 阶段 C:往回摆,空手 —— 推进到 FullSwing 后归 0
+        if (progress < Inserters.FullSwing) Inserters.AddSwing(id, delta);
+        if (Inserters.GetSwingProgress(id) < Inserters.FullSwing) return;
+        Inserters.ArriveAtPickup(id);
     }
 }

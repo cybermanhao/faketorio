@@ -303,4 +303,21 @@ public class PrototypeLoaderTests
     [Fact]
     public void MiningDrillNegativeEnergyUsage_Throws() => AssertLoadThrows(
         "[{ \"type\": \"mining-drill\", \"name\": \"d\", \"energyUsage\": \"-120W\" }]");
+
+    [Fact]
+    public void LoadsInserter()
+    {
+        var ins = Load().Get<InserterPrototype>("inserter-basic");
+        Assert.Equal(1, ins.TileWidth);
+        Assert.Equal(83, ins.EnergyUsageJPerTick);              // 5kW / 60
+        Assert.Equal(Q16.FromRatio(1, 30).Raw, ins.RotationSpeed.Raw);   // 2184
+    }
+
+    [Fact]
+    public void InserterNegativeEnergyUsage_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"inserter\", \"name\": \"i\", \"energyUsage\": \"-120W\" }]");
+
+    [Fact]
+    public void InserterRotationTimeTooLarge_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"inserter\", \"name\": \"i\", \"rotationTimeSeconds\": 2000 }]");   // SecondsToTicks=120000 > 65536 -> FromRatio(1,120000).Raw == 0
 }

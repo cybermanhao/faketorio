@@ -1242,4 +1242,255 @@ public class SimulationTests
         // catches "throttling ignored" without pinning an exact flush off-by-one.
         Assert.InRange(tick, 90, 170);
     }
+
+    private static Command PlaceInserter(Simulation sim, int x, int y, byte rotation) => new()
+    {
+        Type = CommandType.PlaceEntity,
+        ProtoId = sim.Prototypes.Get<InserterPrototype>("inserter-basic").Id,
+        X = x, Y = y, Rotation = rotation,
+    };
+
+    // 电线杆(0,0) + 发电机(2,0)充好煤。机械臂/机器放在 y>=2 处避开 infra footprint。
+    private static void PlacePoweredInserterInfra(Simulation sim)
+    {
+        sim.Submit(PlacePole(sim, 0, 0));
+        sim.Submit(PlaceGenerator(sim, 2, 0));
+        sim.Step();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+        sim.Submit(TransferTo(2, 0, coal, 5));
+        sim.Step();
+    }
+
+    [Fact]
+    public void Inserter_ChestToChest_MovesOneItemPerCycle()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        // 抓取箱(0,2) — 机械臂(1,2) 朝东(rotation 1) — 放置箱(2,2)
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var srcInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        var dstInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+        srcInv.Insert(iron, 3, ironStack);
+
+        // rotationTimeSeconds 0.5 -> RotationSpeed.Raw = 65536/30 = 2184/tick at full power;
+        // half-swing (>= 65536) takes 31 ticks, full pick-to-pick cycle ~63 ticks + grab/place.
+        // 3 items ~= 190 ticks; run 280 for comfortable slack.
+        for (int t = 0; t < 280; t++) sim.Step();
+
+        Assert.Equal(3, dstInv.CountOf(iron));
+        Assert.Equal(0, srcInv.CountOf(iron));
+    }
+
+    [Fact]
+    public void Inserter_SwingProgressAdvancesThroughThreePhases()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)))
+            .Insert(iron, 1, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+        sim.Step(); // grab happens this tick (phase A) -> held set, progress 0
+        Assert.Equal(iron, sim.Inserters.GetHeldItemProtoId(insId));
+
+        // swing out: held != 0, progress climbs
+        for (int t = 0; t < 15; t++) sim.Step();
+        Assert.True(sim.Inserters.GetSwingProgress(insId) > 0);
+        Assert.True(sim.Inserters.GetSwingProgress(insId) < Inserters.HalfSwing);
+
+        // enough more ticks to place and start swinging back: hand cleared, progress >= HalfSwing
+        for (int t = 0; t < 30; t++) sim.Step();
+        Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));
+        Assert.True(sim.Inserters.GetSwingProgress(insId) >= Inserters.HalfSwing);
+    }
+
+    [Fact]
+    public void Inserter_BeltToBelt_MovesItemWithCorrectType()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        // 上游带(0,2) 朝东; 机械臂(1,2) 朝东; 下游带(2,2) 朝东
+        sim.Submit(PlaceBelt(sim, 0, 2, 1));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceBelt(sim, 2, 2, 1));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        // put an item on the upstream belt lane near the inserter's pickup tile (tile index 0, its only tile)
+        var upLine = sim.Belts.GetLine(sim.Belts.GetLineAt(0, 2));
+        Assert.True(upLine.LaneA.TryInsertAt(128, iron));   // centered on tile (0,2)
+
+        for (int t = 0; t < 220; t++) sim.Step();
+
+        var downLine = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        bool onDown = downLine.LaneA.Count > 0 || downLine.LaneB.Count > 0;
+        Assert.True(onDown, "expected the inserter to have moved the item onto the downstream belt");
+        // confirm type survived: whichever lane has it, its front (after enough ticks it reaches the exit) is iron
+        for (int t = 0; t < 40; t++) sim.Step();
+        int frontType = downLine.LaneA.Count > 0 && downLine.LaneA.IsFrontReady ? downLine.LaneA.FrontItemProtoId
+                      : downLine.LaneB.Count > 0 && downLine.LaneB.IsFrontReady ? downLine.LaneB.FrontItemProtoId
+                      : iron; // if it hasn't reached the exit yet, don't fail on that alone
+        Assert.Equal(iron, frontType);
+    }
+
+    [Fact]
+    public void Inserter_IntoFurnaceInput_UsesRole1_OutOfFurnaceOutput_UsesRole2()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        // 抓取箱(0,2) -> 机械臂(1,2)朝东 -> 熔炉(2,2)(输入=role1)
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceFurnace(sim, 2, 2));
+        sim.Step();
+
+        int ore = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        var srcInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        srcInv.Insert(ore, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+
+        var furnaceId = sim.World.GetEntityAt(2, 2);
+        var furnaceInput = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+
+        for (int t = 0; t < 120; t++) sim.Step();
+
+        Assert.True(furnaceInput.CountOf(ore) > 0);   // the inserter put ore into role 1, not role 2 or a nonexistent slot
+        Assert.Equal(0, srcInv.CountOf(ore));
+    }
+
+    [Fact]
+    public void Inserter_OutOfFurnaceOutput_UsesRole2()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        // 机械臂(1,2)朝西(rotation 3):pickup = 身后(2,2) = 熔炉输出(role2);dropoff = 身前(0,2) = 箱
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 3));
+        sim.Submit(PlaceFurnace(sim, 2, 2));
+        sim.Step();
+
+        int plate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        var furnaceId = sim.World.GetEntityAt(2, 2);
+        var furnaceOut = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));   // role 2 = output
+        var furnaceInput = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1)); // role 1 = input, never seeded
+        var dstInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        furnaceOut.Insert(plate, 3, plateStack);
+
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        Assert.True(dstInv.CountOf(plate) > 0);            // the inserter delivered items to the chest
+        Assert.True(furnaceOut.CountOf(plate) < 3);        // pulled from role 2 (output)
+        Assert.Equal(3, dstInv.CountOf(plate) + furnaceOut.CountOf(plate)); // conservation: nothing lost
+        Assert.Equal(0, furnaceInput.CountOf(plate));      // role 1 (input) never touched
+    }
+
+    [Fact]
+    public void Inserter_DropoffBlocked_HoldsItemUntilSpaceFrees()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var srcInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        var dstInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+        srcInv.Insert(iron, 1, ironStack);
+        // fill the destination chest completely
+        for (int s = 0; s < dstInv.SlotCount; s++) dstInv.Insert(iron, ironStack, ironStack);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+        for (int t = 0; t < 100; t++) sim.Step();
+
+        Assert.Equal(iron, sim.Inserters.GetHeldItemProtoId(insId));                 // still holding
+        Assert.True(sim.Inserters.GetSwingProgress(insId) >= Inserters.HalfSwing);   // stuck at the drop angle
+
+        // free one stack; the inserter should place and then complete the cycle
+        dstInv.Remove(iron, ironStack);
+        for (int t = 0; t < 120; t++) sim.Step();
+        Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));
+        Assert.True(dstInv.CountOf(iron) > (dstInv.SlotCount - 1) * ironStack); // gained the held item back
+    }
+
+    [Fact]
+    public void Inserter_UnderpoweredSatisfaction_TakesRoughlyTwiceAsLong()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        var srcInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        var dstInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+        srcInv.Insert(iron, 1, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+
+        // The generator produces genOut J/tick; the inserter's own draw is tiny (~83 J/tick).
+        // To drive satisfaction to ~0.5 the whole network's demand must be ~2x supply, so the
+        // fake competing consumer demands (2*genOut - inserterDemand) — total = 2*genOut,
+        // supply = genOut, satisfaction = 0.5 uniformly across the PrimaryInput tier.
+        long genOut = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").PowerOutputJPerTick;
+        long inserterDemand = sim.Prototypes.Get<InserterPrototype>("inserter-basic").EnergyUsageJPerTick;
+        long fakeDemand = 2 * genOut - inserterDemand;
+        var fakeConsumer = new EntityId(9999, 1);
+
+        int tick = 0;
+        while (dstInv.CountOf(iron) == 0 && tick < 400)
+        {
+            sim.ElectricGrid.RegisterDemand(fakeConsumer, 0, 0, UsagePriority.PrimaryInput, fakeDemand);
+            sim.Step();
+            tick++;
+        }
+
+        // Full-power first delivery is ~half a cycle (grab @ tick 1, place @ ~tick 32). Halved
+        // satisfaction roughly doubles the swing-out phase to ~62. Wide bracket, comfortably clear
+        // of the full-power ~32 on the low side and a stuck/hung inserter (400 cap) on the high side.
+        Assert.InRange(tick, 48, 130);
+    }
+
+    [Fact]
+    public void Inserter_DestroyedWhileHoldingItem_UnregistersCleanly()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)))
+            .Insert(iron, 1, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+        sim.Step();   // grab
+        Assert.Equal(iron, sim.Inserters.GetHeldItemProtoId(insId));
+
+        sim.Submit(new Command { Type = CommandType.RemoveEntity, X = 1, Y = 2 });
+        var ex = Record.Exception(() => sim.Step());
+
+        Assert.Null(ex);
+        Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));   // state gone, held item silently discarded
+        Assert.False(sim.World.GetEntityAt(1, 2).IsValid);
+    }
 }

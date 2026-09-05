@@ -168,7 +168,7 @@ public sealed class BeltNetwork
     private static int ClearRange(BeltLane lane, int from, int to)
     {
         int c = 0;
-        while (lane.TryRemoveItemInRange(from, to)) c++;
+        while (lane.TryRemoveItemInRange(from, to, out _)) c++;
         return c;
     }
 
@@ -193,8 +193,8 @@ public sealed class BeltNetwork
         int discarded = 0;
         foreach (var lane in new[] { line.LaneA, line.LaneB })
         {
-            while (lane.TryRemoveItemInRange(cut, n * L)) { }
-            while (lane.TryRemoveItemInRange(k * L - (W - 1), n * L)) discarded++;
+            while (lane.TryRemoveItemInRange(cut, n * L, out _)) { }
+            while (lane.TryRemoveItemInRange(k * L - (W - 1), n * L, out _)) discarded++;
             lane.ShrinkBack((n - k) * L);
         }
         line.Tiles.RemoveRange(k, n - k);

@@ -374,7 +374,7 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_NoItemInRange_ReturnsFalseAndKeepsState()
     {
         var lane = MakeThreeItemLane();                 // gaps=[20,20,24],前沿 20/104/192
-        Assert.False(lane.TryRemoveItemInRange(200, 220));
+        Assert.False(lane.TryRemoveItemInRange(200, 220, out _));
         Assert.Equal(new[] { 20, 20, 24 }, lane.Gaps);
     }
 
@@ -382,7 +382,7 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_MiddleItem_StitchesGapsKeepingSurvivorsInPlace()
     {
         var lane = MakeThreeItemLane();
-        Assert.True(lane.TryRemoveItemInRange(100, 110)); // 命中中间物品(前沿 104)
+        Assert.True(lane.TryRemoveItemInRange(100, 110, out _)); // 命中中间物品(前沿 104)
         Assert.Equal(new[] { 20, 108 }, lane.Gaps);        // 24 + 20 + 64
         Assert.Equal(new[] { 20, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 幸存物品没有移动
     }
@@ -391,7 +391,7 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_LastItem_JustDropsIt()
     {
         var lane = MakeThreeItemLane();
-        Assert.True(lane.TryRemoveItemInRange(190, 260));
+        Assert.True(lane.TryRemoveItemInRange(190, 260, out _));
         Assert.Equal(new[] { 20, 20 }, lane.Gaps);
     }
 
@@ -399,7 +399,7 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_FrontItemWithNonZeroFrontGap_FoldsIntoNextGap()
     {
         var lane = MakeThreeItemLane();
-        Assert.True(lane.TryRemoveItemInRange(0, 50));   // 命中最前物品(前沿 20)
+        Assert.True(lane.TryRemoveItemInRange(0, 50, out _));   // 命中最前物品(前沿 20)
         Assert.Equal(new[] { 104, 24 }, lane.Gaps);       // 20 + 20 + 64
     }
 
@@ -412,7 +412,7 @@ public class BeltLaneTests
         b.TryInsertAtBack(TestItem); b.Advance(100); b.TryInsertAtBack(TestItem); b.Advance(110); // gaps=[0,18]
 
         a.RemoveFront();
-        Assert.True(b.TryRemoveItemInRange(0, 1));
+        Assert.True(b.TryRemoveItemInRange(0, 1, out _));
 
         Assert.Equal(a.Gaps, b.Gaps); // 两者都是 [82]
     }
@@ -423,7 +423,7 @@ public class BeltLaneTests
         var lane = BeltLane.FromAbsolutePositions(256, Positions(0, 64, 128, 192)); // gaps=[0,0,0,0]
         lane.Advance(1000); // 游标推到末尾,gaps 仍是 [0,0,0,0]
 
-        Assert.True(lane.TryRemoveItemInRange(64, 65)); // 摘掉下标 1(前沿 64)
+        Assert.True(lane.TryRemoveItemInRange(64, 65, out _)); // 摘掉下标 1(前沿 64)
         // 缝合:_gaps[2] += _gaps[1] + 64 => [0,0,64,0],RemoveAt(1) => [0,64,0]
 
         lane.Advance(64); // 若游标没被收回,这个 64 gap 不会被消耗
@@ -434,7 +434,7 @@ public class BeltLaneTests
     public void TryRemoveItemInRange_TwoItemsInRange_RemovesFrontmost()
     {
         var lane = MakeThreeItemLane();                 // gaps=[20,20,24],前沿 20/104/192
-        Assert.True(lane.TryRemoveItemInRange(0, 150)); // 范围包含前沿 20 和 104 的两个物品
+        Assert.True(lane.TryRemoveItemInRange(0, 150, out _)); // 范围包含前沿 20 和 104 的两个物品
         Assert.Equal(new[] { 104, 24 }, lane.Gaps);    // 20 + 20 + 64 = 104
         Assert.Equal(2, lane.Count);
         Assert.Equal(new[] { 104, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles)); // 幸存物品位置不变
@@ -593,5 +593,97 @@ public class BeltLaneTests
         var positions = rebuilt.ToAbsolutePositions();
         Assert.Equal(10, positions[0].ItemProtoId);
         Assert.Equal(20, positions[1].ItemProtoId);
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_ReturnsGrabbedItemType()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(42);
+        lane.Advance(1000); // push to exit so its leading edge is at 0
+
+        Assert.True(lane.TryRemoveItemInRange(0, 64, out int removed));
+        Assert.Equal(42, removed);
+        Assert.Equal(0, lane.Count);
+    }
+
+    [Fact]
+    public void TryRemoveItemInRange_NoHit_OutIsZero_StateUnchanged()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAtBack(42); // gaps=[192], leading edge at 192
+
+        Assert.False(lane.TryRemoveItemInRange(0, 64, out int removed)); // nothing near the exit
+        Assert.Equal(0, removed);
+        Assert.Equal(1, lane.Count);
+        Assert.Equal(new[] { 192 }, lane.Gaps);
+    }
+
+    [Fact]
+    public void TryInsertAt_EmptyLane_InsertsAtGivenPosition()
+    {
+        var lane = new BeltLane(256);
+
+        Assert.True(lane.TryInsertAt(100, 42));
+        Assert.Equal(1, lane.Count);
+        Assert.Equal(new[] { 100 }, lane.Gaps); // leading edge 100 = gap-to-exit 100
+        var positions = lane.ToAbsolutePositions();
+        Assert.Equal(100, positions[0].LeadingEdgeSubTiles);
+        Assert.Equal(42, positions[0].ItemProtoId);
+    }
+
+    [Fact]
+    public void TryInsertAt_BetweenTwoItems_WithRoom_Succeeds()
+    {
+        // Two items at leading edges 0 and 192; insert one at 100 (fits: 0+64=64 <= 100, 100+64=164 <= 192).
+        var lane = BeltLane.FromAbsolutePositions(256, new[]
+        {
+            new BeltLane.PositionedItem(0, 10),
+            new BeltLane.PositionedItem(192, 20),
+        });
+
+        Assert.True(lane.TryInsertAt(100, 30));
+        var positions = lane.ToAbsolutePositions();
+        Assert.Equal(new[] { 0, 100, 192 }, positions.Select(p => p.LeadingEdgeSubTiles));
+        Assert.Equal(new[] { 10, 30, 20 }, positions.Select(p => p.ItemProtoId));
+        Assert.Equal(3, lane.Count);
+    }
+
+    [Fact]
+    public void TryInsertAt_OverlapsNeighbor_ReturnsFalse_StateUnchanged()
+    {
+        var lane = BeltLane.FromAbsolutePositions(256, new[]
+        {
+            new BeltLane.PositionedItem(0, 10),
+            new BeltLane.PositionedItem(192, 20),
+        });
+
+        Assert.False(lane.TryInsertAt(40, 30));   // 40 < 0+64: overlaps the front item's body
+        Assert.False(lane.TryInsertAt(150, 30));  // 150+64=214 > 192: overlaps the back item's body
+        Assert.Equal(2, lane.Count);
+        Assert.Equal(new[] { 0, 192 }, lane.ToAbsolutePositions().Select(p => p.LeadingEdgeSubTiles));
+    }
+
+    [Fact]
+    public void TryInsertAt_OutOfBounds_ReturnsFalse()
+    {
+        var lane = new BeltLane(256);
+        Assert.False(lane.TryInsertAt(-1, 42));      // negative
+        Assert.False(lane.TryInsertAt(200, 42));     // 200+64=264 > 256
+        Assert.Equal(0, lane.Count);
+    }
+
+    [Fact]
+    public void TryInsertAt_KeepsGapsAndItemIdsParallel()
+    {
+        var lane = new BeltLane(256);
+        lane.TryInsertAt(0, 10);
+        lane.TryInsertAt(128, 20);
+        lane.TryInsertAt(64, 30);   // squeezes between 0 and 128
+
+        var positions = lane.ToAbsolutePositions();
+        Assert.Equal(3, positions.Count);
+        Assert.Equal(new[] { 0, 64, 128 }, positions.Select(p => p.LeadingEdgeSubTiles));
+        Assert.Equal(new[] { 10, 30, 20 }, positions.Select(p => p.ItemProtoId));
     }
 }
