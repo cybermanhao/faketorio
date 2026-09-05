@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态: ✅ 已合并 main · 已验证** — 主线提交 `4732384`..`0a1f8d1`(见 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md` 进度快照)。最终审查修复轮补了一个 C1 崩溃守卫 + 三条 spec §9 漏掉的测试。下方 `- [ ]` 复选框为执行期工件,不代表当前状态。
+
 **Goal:** Give `BeltLane` item-type tracking (a prerequisite the roadmap flagged as required before any producer can drop typed items on a belt), then build an electric mining drill on top of it — footprint resource search, electricity-throttled progress, output routed to a belt or container.
 
 **Architecture:** `BeltLane` grows a parallel `_itemProtoIds` array alongside its existing `_gaps` array, kept in lockstep at every mutation point; `ToAbsolutePositions`/`FromAbsolutePositions` (the cold-path rebuild used by belt merge/split) carry a new `PositionedItem(LeadingEdgeSubTiles, ItemProtoId)` record struct instead of a bare `int`. `MiningDrillPrototype` (static data) + `MiningDrills` (pure runtime-state container, flat `namespace Faketorio.Sim;` — same fix P5's `Player` and P9's `Machines` needed) + a two-pass `Simulation` tick mirroring P9's `Settle()`-bracketing pattern exactly.

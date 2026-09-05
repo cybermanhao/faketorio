@@ -6,7 +6,7 @@
 
 ## 进度快照(2026-09-05,更新)
 
-`main` HEAD `0c93ac1`;`dotnet test sim/Faketorio.Sim.Tests` = **341 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+`main` HEAD `0a1f8d1`;`dotnet test sim/Faketorio.Sim.Tests` = **369 passing**;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
 
 | 子项目 | 状态 | 主线提交(合并后) |
 |---|---|---|
@@ -21,16 +21,16 @@
 | **P5** 玩家实体 + 位置 + MovePlayer + 玩家背包 + HandMine + HandCraft + 开局物资包 | ✅ 已合并·已验证 | `2ad2b1f`..`a5f569d` |
 | **P7** 电网(电线杆连通分量 + supply_area + 每 tick 每网结算 + 缺电降速 + satisfaction + 燃料发电机,P8 并入本项) | ✅ 已合并·已验证 | `f058345`..`bc9c8ae` |
 | **P9** 加工状态机(熔炉自动匹配 + 装配机 SetRecipe 共用两趟 tick,satisfaction 等比降速) | ✅ 已合并·已验证 | `a9ed5c4`..`0c93ac1` |
-| **P10** 电力采矿机 | ⬜ 未开始 | — |
+| **P10** typed belt items + 电力采矿机(footprint 单目标找矿 + satisfaction 降速 + 输出 belt/箱子;并入了 typed belt items 前置项) | ✅ 已合并·已验证 | `4732384`..`0a1f8d1` |
 | **P11** 机械臂(belt lane ↔ inventory 抓/放) | ⬜ 未开始 | — |
-| 横切 · **typed belt items**(BeltLane 目前只表达位置+数量;`TryInsertAtBack()` 不收 `ItemPrototype`) | ⬜ 未立项 · **P10 之前必须** | — |
+| 横切 · **typed belt items** | ✅ 已合并(并入 P10 Task 1) | `039748f` |
 | 横切 · RotateEntity 命令 | ⬜ 未立项(单独小 plan) | — |
 | 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项 · **P9 已落地机器状态,现在可以立项**(P9 最终审查建议:两趟全量扫描 + 每 tick 重查 Inventories/Prototypes 是天然的优化落点) | — |
 | 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ⬜ 未立项 · **建议 P7/P9 前立最小回归基线**(当前仓库无 CI / 无基准项目) | — |
 
-完成度分层看:M1 模拟基础设施 + 首个可玩闭环片段 ≈ P1–P9 已落地(挖矿→手搓→熔炼→装配→存储→电力,全流程打通,只差把加工产物自动搬运进/出机器);电力采矿机 / 机械臂未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。P5 执行期确认:typed belt items 不必卡在 P5 前(手挖只碰玩家背包,不碰传送带),但仍不能晚于 P10。P7 执行期确认:发电机结算的多生产者取整用 Hamilton(最大余数法)分配以保证守恒且不超容量;`TransferFromEntity` 的搬回逻辑改为搬移前按目标容量夹紧,避免 readOnly 库存下的物品消失。P9 执行期确认:机器输入/输出实际落地成普通 `Inventory`(按 `role` 区分,非 readOnly)而非 P7 预想的 readOnly 库存,故上述修复目前仍是防御性代码,未被任何现有路径触发——一旦 P11 机械臂能从机器库存搬东西,`Simulation.MachineTickPostSettle` 的完成前重校验分支(§P9 spec)会从"防御性、不可达"变成真正会走到的分支,当时要把它从"重置进度"改成"冻结进度"以保持与进度推进阶段一致的语义(P9 最终审查已记录为一条待办)。
+完成度分层看:M1 模拟基础设施 + 采矿→加工→存储→电力全链条 ≈ P1–P10 已落地(挖矿/自动采矿→手搓→熔炼→装配→存储→电力,传送带现在带物品类型);机械臂(自动物流)未开始;表现层(Godot 工程 + UI)未开始且不在本系列 sim 计划范围。P7 执行期确认:发电机结算的多生产者取整用 Hamilton(最大余数法)分配以保证守恒且不超容量;`TransferFromEntity` 的搬回逻辑改为搬移前按目标容量夹紧,避免 readOnly 库存下的物品消失。P9 执行期确认:机器输入/输出实际落地成普通 `Inventory`(按 `role` 区分,非 readOnly)而非 P7 预想的 readOnly 库存,故上述修复目前仍是防御性代码,未被任何现有路径触发——一旦 P11 机械臂能从机器库存搬东西,`Simulation.MachineTickPostSettle` 的完成前重校验分支(§P9 spec)会从"防御性、不可达"变成真正会走到的分支,当时要把它从"重置进度"改成"冻结进度"以保持与进度推进阶段一致的语义(P9 最终审查已记录为一条待办)。P10 执行期确认:采矿机输出方向复用放置期 `Command.Rotation`(不建 `RotateEntity` 命令);采矿机目标格被外部(玩家手挖)挖空会触发 `MiningDrillTickPostSettle` 里对空矿格的 `ResourcePrototype` 强转崩溃,已在最终审查修复轮加 `cell.IsEmpty` 守卫——**这类"锁定的世界格子被别的系统改掉"的 race 是 P11 机械臂、以及任何未来能改 `ResourceGrid`/机器库存的系统都要小心的模式**。另:实体被销毁时手里的待放置物品(采矿机/传送带/箱子/P9 机器完成品)一律丢弃,M1 没有掉落到世界的机制,这是全代码库一致的既有行为,将来若要"销毁掉落"需单独立项统一处理所有实体。
 
-下一步:**P10 电力采矿机**——依赖 P4 + P6 + P7;**P11 机械臂**依赖 P4 + P9(把机器的 role 库存接进机械臂的抓/放对象),两者可并行推进。
+下一步:**P11 机械臂**(belt lane ↔ inventory 抓/放,依赖 P4 + P9 + P10 的 typed belt items);或先做几个横切小项(`RotateEntity`、实体休眠/活跃列表、CI 基准场景)。
 
 ## 0. 背景
 
