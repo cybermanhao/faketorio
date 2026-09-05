@@ -662,4 +662,58 @@ public class SimulationTests
         Assert.Equal(Q16.One, sim.ElectricGrid.GetSatisfaction(fakeConsumer));
         Assert.True(sim.ElectricGrid.GetFuelBufferJ(genId) > 0);   // 只烧了一半,缓冲还有剩(一块煤够很多 tick)
     }
+
+    private static Command TransferFrom(int x, int y, int itemId, int count) => new()
+        { Type = CommandType.TransferFromEntity, X = x, Y = y, ProtoId = itemId, Count = count };
+
+    [Fact]
+    public void TransferFromEntity_HappyPath_MovesItemsBothWays()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        sim.Submit(PlaceChest(sim, 5, 0));
+        sim.Step();
+
+        var chestId = sim.World.GetEntityAt(5, 0);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+        chestInv.Insert(coal, 10, sim.Prototypes.Get<ItemPrototype>("coal").StackSize);
+
+        int playerBefore = sim.Player.Inventory.CountOf(coal);
+        sim.Submit(TransferFrom(5, 0, coal, 6));
+        sim.Step();
+
+        Assert.Equal(playerBefore + 6, sim.Player.Inventory.CountOf(coal));
+        Assert.Equal(4, chestInv.CountOf(coal));
+    }
+
+    [Fact]
+    public void TransferFromEntity_MoreThanPlayerCanHold_ClampsWithoutLosingItems()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int ironPlate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        // 玩家背包 60 槽,起始物品(8 个铁板的半满槽 + 1 把木箱的槽)占 2 槽。
+        // 补满那个半满槽(92 个)再填满剩下 58 个空槽中的 57 个(57*100),
+        // 精确留 1 个空槽——只够装 1 组煤(50)。
+        sim.Player.Inventory.Insert(ironPlate, (ironStack - 8) + 57 * ironStack, ironStack);
+
+        sim.Submit(PlaceChest(sim, 5, 0));
+        sim.Step();
+        var chestId = sim.World.GetEntityAt(5, 0);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+        chestInv.Insert(coal, 80, coalStack);   // 箱子里 80 个煤,远超玩家能吃下的量
+
+        int totalBefore = sim.Player.Inventory.CountOf(coal) + chestInv.CountOf(coal);
+        sim.Submit(TransferFrom(5, 0, coal, 80));
+        sim.Step();
+
+        int totalAfter = sim.Player.Inventory.CountOf(coal) + chestInv.CountOf(coal);
+        Assert.Equal(0, sim.RejectedCommandCount);
+        Assert.Equal(totalBefore, totalAfter);              // 一个都没凭空消失
+        Assert.Equal(50, sim.Player.Inventory.CountOf(coal));  // 只搬了玩家吃得下的 50 个
+        Assert.Equal(30, chestInv.CountOf(coal));              // 箱子里剩下搬不走的 30 个
+    }
 }

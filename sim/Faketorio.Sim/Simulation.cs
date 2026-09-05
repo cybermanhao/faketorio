@@ -224,6 +224,29 @@ public sealed class Simulation
         Player.CompleteOneCraftUnit();
     }
 
+    // 只读地算出 inv 还能吃下多少个 itemProtoId(镜像 Inventory.CanInsert 的两轮逻辑,
+    // 但返回精确数量而非 bool)。ReadOnly/过滤不匹配 -> 0,不改任何状态。
+    // TransferFromEntity 用它在 Remove 之前把搬运量夹到"玩家背包确实吃得下"的量,
+    // 避免"先扣源、玩家吃不下再放回源"这条路径——源如果是 readOnly(P9 机器输出槽),
+    // 放回去的 Insert 会静默失败(返回 0),物品就凭空消失。
+    private static int AvailableSpace(Inventory inv, int itemProtoId, int stackSize)
+    {
+        if (inv.ReadOnly) return 0;
+        if (inv.FilterItemProtoId != 0 && itemProtoId != inv.FilterItemProtoId) return 0;
+        if (stackSize <= 0) return 0;
+
+        int space = 0;
+        for (int i = 0; i < inv.SlotCount; i++)
+        {
+            var slot = inv[i];
+            if (slot.ItemProtoId == itemProtoId && slot.Count < stackSize)
+                space += stackSize - slot.Count;
+            else if (slot.IsEmpty)
+                space += stackSize;
+        }
+        return space;
+    }
+
     // 一条线按其出口格(Tiles[0])的传送带 prototype 速度跑(设计文档第 7 节)。
     // 严格:出口格上一定是传送带实体,不做 fallback。
     private int ResolveBeltSpeed(BeltLine line)
@@ -346,7 +369,11 @@ public sealed class Simulation
                     return;
                 }
                 var sourceInv = Inventories.Get(sourceInvId);
-                int amount2 = Math.Min(command.Count, sourceInv.CountOf(command.ProtoId));
+                // 先算出玩家背包实际能吃下多少(不改状态),再夹到 min(请求量, 源库存现有量, 玩家能吃量)。
+                // 这样 Remove 和 Insert 的数量必然一致,不需要"塞不下再放回去"——放回去这条路径
+                // 在 sourceInv 是 readOnly(P9 机器输出槽)时会把差额静默丢掉(Insert 对 readOnly 恒返回 0)。
+                int space = AvailableSpace(Player.Inventory, command.ProtoId, itemProto2.StackSize);
+                int amount2 = Math.Min(Math.Min(command.Count, sourceInv.CountOf(command.ProtoId)), space);
                 if (amount2 <= 0)
                 {
                     RejectedCommandCount++;
@@ -354,8 +381,7 @@ public sealed class Simulation
                 }
                 int removed = sourceInv.Remove(command.ProtoId, amount2);
                 int inserted2 = Player.Inventory.Insert(command.ProtoId, removed, itemProto2.StackSize);
-                if (inserted2 < removed)
-                    sourceInv.Insert(command.ProtoId, removed - inserted2, itemProto2.StackSize);
+                System.Diagnostics.Debug.Assert(inserted2 == removed, "TransferFromEntity: amount was pre-clamped to available space, insert should never partially fail");
                 return;
             }
             case CommandType.CraftEnqueue:
