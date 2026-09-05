@@ -306,4 +306,44 @@ public class DeterminismTests
     [Fact]
     public void MiningDrillScenario_SameSeedSameCommands_SameHashEveryTick()
         => Assert.Equal(RunMiningDrillScenario(4242), RunMiningDrillScenario(4242));
+
+    private static List<ulong> RunInserterScenario(long seed)
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        sim.Player.Inventory.Insert(coal, 5, coalStack);
+
+        var hashes = new List<ulong>();
+        for (int t = 0; t < 200; t++)
+        {
+            if (t == 0)
+            {
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<ElectricPolePrototype>("small-electric-pole").Id, X = 0, Y = 0 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").Id, X = 2, Y = 0 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id, X = 0, Y = 2 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<InserterPrototype>("inserter-basic").Id, X = 1, Y = 2, Rotation = 1 });
+                sim.Submit(new Command { Type = CommandType.PlaceEntity,
+                    ProtoId = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id, X = 2, Y = 2 });
+            }
+            if (t == 3)
+                sim.Submit(new Command { Type = CommandType.TransferToEntity, X = 2, Y = 0, ProtoId = coal, Count = 5 });
+            if (t == 4)
+                // seed the source chest with a few iron plates directly (not a command — same as other scenarios do)
+                sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2))).Insert(iron, 4, ironStack);
+            sim.Step();
+            hashes.Add(sim.ComputeStateHash());
+        }
+        return hashes;
+    }
+
+    [Fact]
+    public void InserterScenario_SameSeedSameCommands_SameHashEveryTick()
+        => Assert.Equal(RunInserterScenario(4242), RunInserterScenario(4242));
 }
