@@ -533,4 +533,26 @@ public class BeltNetworkTests
         Assert.Equal(512, net.GetLine(id).LengthSubTiles);
         Assert.Equal(0, net.GetLine(net.GetLineAt(2, 3)).LaneA.Count);            // 后半段空
     }
+
+    [Fact]
+    public void RemoveBelt_MiddleSplit_StillDiscardsAndCountsItemsAfterOutParamChange()
+    {
+        var net = new BeltNetwork();
+        net.AddBelt(0, 0, 1); net.AddBelt(1, 0, 1); net.AddBelt(2, 0, 1); // one east line, 3 tiles
+
+        var line = net.GetLine(net.GetLineAt(0, 0));
+        // East line, exit at max x -> Tiles ordered [(2,0),(1,0),(0,0)]; middle tile (1,0) spans
+        // leading-edge [256,512). Body [300,364) sits squarely on it.
+        line.LaneA.TryInsertAt(300, 7);   // an item on the middle tile (1,0)
+        int before = line.LaneA.Count;
+        Assert.Equal(1, before);
+
+        net.RemoveBelt(1, 0); // middle split — the straddling item is discarded
+
+        // front half (tile 0) and back half (tile 2) each survive as their own line;
+        // the item that was on the removed middle tile is gone.
+        int frontCount = net.GetLine(net.GetLineAt(0, 0)).LaneA.Count;
+        int backCount = net.GetLine(net.GetLineAt(2, 0)).LaneA.Count;
+        Assert.Equal(0, frontCount + backCount);
+    }
 }

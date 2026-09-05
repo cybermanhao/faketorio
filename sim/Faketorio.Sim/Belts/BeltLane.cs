@@ -216,15 +216,17 @@ public sealed class BeltLane
         return lane;
     }
 
-    // 摘除"前沿绝对距离落在 [fromSubTile, toSubTile) 内"的最前一个物品。
+    // 摘除"前沿绝对距离落在 [fromSubTile, toSubTile) 内"的最前一个物品,并通过
+    // removedItemProtoId 返回它的类型。无命中:返回 false,removedItemProtoId = 0,不改状态。
     // 注:范围测试仅限每个物品的前沿(不含体重叠),故若需捕获体跨越 [fromSubTile, toSubTile)
-    // 的物品,调用者需把 fromSubTile 扩大至多 ItemWidthSubTiles-1。用于 Plan 3c 的格子移除。
+    // 的物品,调用者需把 fromSubTile 扩大至多 ItemWidthSubTiles-1。用于 Plan 3c 的格子移除
+    // 和 Plan 11 机械臂的按位置抓取。
     // 命中:把它前方 gap、自身 ItemWidthSubTiles、后方 gap 缝合进后一个 gap
     // (是最后一个物品时直接丢弃,腾出的空间自动回到队尾),返回 true。
-    // 无命中:返回 false,不改状态。
     // RemoveFront 是本操作在"下标 0、前方 gap 为 0"特例下的简化版。
-    public bool TryRemoveItemInRange(int fromSubTile, int toSubTile)
+    public bool TryRemoveItemInRange(int fromSubTile, int toSubTile, out int removedItemProtoId)
     {
+        removedItemProtoId = 0;
         int pos = 0;
         int removeAt = -1;
         for (int k = 0; k < _gaps.Count; k++)
@@ -235,6 +237,8 @@ public sealed class BeltLane
             pos += ItemWidthSubTiles;
         }
         if (removeAt < 0) return false;
+
+        removedItemProtoId = _itemProtoIds[removeAt];   // 摘除前先记下类型
 
         if (removeAt + 1 < _gaps.Count)
             _gaps[removeAt + 1] += _gaps[removeAt] + ItemWidthSubTiles;
@@ -248,6 +252,45 @@ public sealed class BeltLane
         else if (_openIndex > _gaps.Count - 1)
             _openIndex = _gaps.Count - 1;
 
+        return true;
+    }
+
+    // 在 lane 的绝对位置(前沿离出口 leadingEdgeSubTile 亚格)插入一个 itemProtoId 物品。
+    // 用于 Plan 11 机械臂往传送带中段放物。要求:leadingEdgeSubTile >= 0;
+    // leadingEdgeSubTile + ItemWidthSubTiles <= _lineLengthSubTiles;且插入后与前后相邻
+    // 物品的体不重叠。任一不满足 → 返回 false,不改状态。这个结构性检查就是"放置节流
+    // 到传送带容量"的机制——位置被占就放不下,机械臂手一直拿着等。
+    // 命中:在正确的下标处 Insert 进 _gaps / _itemProtoIds(保持前到后升序),
+    // 重算被影响的后邻居 gap,_openIndex 收回到 <= 插入下标。
+    public bool TryInsertAt(int leadingEdgeSubTile, int itemProtoId)
+    {
+        if (leadingEdgeSubTile < 0) return false;
+        if (leadingEdgeSubTile + ItemWidthSubTiles > _lineLengthSubTiles) return false;
+
+        // 扫到插入下标 i:第一个前沿 > leadingEdgeSubTile 的物品排在新物品后面。
+        // 同时记录前邻居的后沿。
+        int pos = 0;
+        int prevTrailingEdge = 0;
+        int i = _gaps.Count;
+        for (int k = 0; k < _gaps.Count; k++)
+        {
+            pos += _gaps[k];                 // 物品 k 的前沿
+            if (pos > leadingEdgeSubTile) { i = k; break; }
+            prevTrailingEdge = pos + ItemWidthSubTiles;
+            pos += ItemWidthSubTiles;
+        }
+
+        // 前邻居不重叠:新物品前沿 >= 前邻居后沿
+        if (leadingEdgeSubTile < prevTrailingEdge) return false;
+        // 后邻居不重叠:后邻居前沿(循环 break 时 pos 正是物品 i 的前沿)>= 新物品后沿
+        if (i < _gaps.Count && pos < leadingEdgeSubTile + ItemWidthSubTiles) return false;
+
+        int newGap = leadingEdgeSubTile - prevTrailingEdge;
+        _gaps.Insert(i, newGap);
+        _itemProtoIds.Insert(i, itemProtoId);
+        if (i + 1 < _gaps.Count)
+            _gaps[i + 1] -= newGap + ItemWidthSubTiles;   // 后邻居离新物品更近了
+        _openIndex = Math.Min(_openIndex, i);
         return true;
     }
 
