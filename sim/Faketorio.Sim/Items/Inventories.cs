@@ -21,9 +21,9 @@ public sealed class Inventories
     }
 
     // 建一个 slotCount 槽的库存并绑给 entity。前置:该 entity 尚未有库存。
-    public InventoryId AddContainer(EntityId entity, int slotCount)
+    public InventoryId AddContainer(EntityId entity, int slotCount, bool readOnly = false, int filterItemProtoId = 0)
     {
-        var id = _pool.Create(new Inventory(slotCount));
+        var id = _pool.Create(new Inventory(slotCount, readOnly, filterItemProtoId));
         EnsureByEntity(entity.Index);
         _byEntity[entity.Index] = id;
         EnsureOwnerByIndex(id.Index);

@@ -220,4 +220,38 @@ public class PrototypeLoaderTests
     [Fact]
     public void PlayerReachZero_Throws() => AssertLoadThrows(
         "[{ \"type\": \"player\", \"name\": \"player\", \"reachSubTiles\": 0 }]");
+
+    [Fact]
+    public void LoadsElectricPole()
+    {
+        var pole = Load().Get<ElectricPolePrototype>("small-electric-pole");
+        Assert.Equal(7, pole.MaximumWireDistanceTiles);
+        Assert.Equal(2, pole.SupplyAreaDistanceTiles);
+    }
+
+    [Fact]
+    public void LoadsFuelGeneratorWithResolvedFuelId()
+    {
+        var gen = Load().Get<FuelGeneratorPrototype>("burner-generator");
+        int coalId = Load().Get<ItemPrototype>("coal").Id;
+        Assert.Equal(1500, gen.PowerOutputJPerTick);   // 90kW / 60 ticks-per-second
+        Assert.Equal(coalId, gen.FuelItemProtoId);
+    }
+
+    [Fact]
+    public void PoleZeroWireDistance_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"electric-pole\", \"name\": \"p\", \"maximumWireDistanceTiles\": 0, \"supplyAreaDistanceTiles\": 2 }]");
+
+    [Fact]
+    public void PoleZeroSupplyArea_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"electric-pole\", \"name\": \"p\", \"maximumWireDistanceTiles\": 7, \"supplyAreaDistanceTiles\": 0 }]");
+
+    [Fact]
+    public void GeneratorZeroPowerOutput_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"item\", \"name\": \"coal\", \"stackSize\": 50 }, " +
+        "{ \"type\": \"fuel-generator\", \"name\": \"g\", \"fuelItemName\": \"coal\" }]");
+
+    [Fact]
+    public void GeneratorUnknownFuelItem_Throws() => AssertLoadThrows(
+        "[{ \"type\": \"fuel-generator\", \"name\": \"g\", \"powerOutput\": \"90kW\", \"fuelItemName\": \"nonexistent\" }]");
 }

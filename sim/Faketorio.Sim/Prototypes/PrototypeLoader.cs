@@ -18,7 +18,32 @@ public static class PrototypeLoader
         registry.AssignIds();
         ResolveAndValidateMapGen(registry);
         ResolveAndValidateRecipesAndPlayer(registry);
+        ResolveAndValidateElectric(registry);
         return registry;
+    }
+
+    // AssignIds() 之后:校验电线杆字段,解析 + 校验发电机的燃料物品名。
+    private static void ResolveAndValidateElectric(PrototypeRegistry registry)
+    {
+        for (int i = 0; i < registry.Count; i++)
+        {
+            switch (registry.GetById(i))
+            {
+                case ElectricPolePrototype pole:
+                    if (pole.MaximumWireDistanceTiles < 1)
+                        throw new InvalidDataException($"Electric pole '{pole.Name}': maximumWireDistanceTiles must be >= 1");
+                    if (pole.SupplyAreaDistanceTiles < 1)
+                        throw new InvalidDataException($"Electric pole '{pole.Name}': supplyAreaDistanceTiles must be >= 1");
+                    break;
+                case FuelGeneratorPrototype gen:
+                    if (gen.PowerOutputJPerTick < 1)
+                        throw new InvalidDataException($"Fuel generator '{gen.Name}': powerOutput must be positive");
+                    if (!registry.TryGet<ItemPrototype>(gen.FuelItemName, out var fuelItem))
+                        throw new InvalidDataException($"Fuel generator '{gen.Name}': fuelItemName '{gen.FuelItemName}' has no matching item");
+                    gen.FuelItemProtoId = fuelItem.Id;
+                    break;
+            }
+        }
     }
 
     // spec §4.1 / §4.3:AssignIds() 之后跑一次。把每个 ResourcePrototype.Layer 的
@@ -207,6 +232,22 @@ public static class PrototypeLoader
                 StartingInventory        = ParseAmounts(el.TryGetProperty("startingInventory", out var si)
                     ? si : default).AsReadOnly(),
             },
+            "electric-pole" => ValidateFootprint(new ElectricPolePrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                MaximumWireDistanceTiles = GetInt(el, "maximumWireDistanceTiles", 0),
+                SupplyAreaDistanceTiles  = GetInt(el, "supplyAreaDistanceTiles", 0),
+            }),
+            "fuel-generator" => ValidateFootprint(new FuelGeneratorPrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                PowerOutputJPerTick = el.TryGetProperty("powerOutput", out var po) ? Units.ParsePower(po.GetString()!) : 0L,
+                FuelItemName = el.GetProperty("fuelItemName").GetString()!,
+            }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
     }
