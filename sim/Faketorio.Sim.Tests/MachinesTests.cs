@@ -125,6 +125,24 @@ public class MachinesTests
     }
 
     [Fact]
+    public void SetRecipe_UnregisteredEntity_Throws()
+    {
+        var m = new Machines();
+        var id = new EntityId(10, 1);
+
+        Assert.Throws<KeyNotFoundException>(() => m.SetRecipe(id, 1));
+    }
+
+    [Fact]
+    public void RestartCycle_UnregisteredEntity_Throws()
+    {
+        var m = new Machines();
+        var id = new EntityId(11, 1);
+
+        Assert.Throws<KeyNotFoundException>(() => m.RestartCycle(id, clearRecipe: true));
+    }
+
+    [Fact]
     public void WriteState_SortsByEntityIndex_RegistrationOrderDoesNotMatter()
     {
         var idHigh = new EntityId(9, 1);

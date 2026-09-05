@@ -17,7 +17,11 @@ public sealed class Machines
     public long GetProgress(EntityId id) => _states.TryGetValue(id, out var s) ? s.Progress : 0;
     public bool IsCompleted(EntityId id) => _states.TryGetValue(id, out var s) && s.Completed;
 
-    public void SetRecipe(EntityId id, int recipeProtoId) => _states[id] = new MachineRuntimeState(recipeProtoId, 0, false);
+    public void SetRecipe(EntityId id, int recipeProtoId)
+    {
+        _ = _states[id];
+        _states[id] = new MachineRuntimeState(recipeProtoId, 0, false);
+    }
 
     public void AddProgress(EntityId id, long delta)
     {
@@ -36,6 +40,7 @@ public sealed class Machines
     // SetRecipe——同真实 Factorio 装配机行为)。
     public void RestartCycle(EntityId id, bool clearRecipe)
     {
+        _ = _states[id];
         int recipe = clearRecipe ? -1 : GetCurrentRecipe(id);
         _states[id] = new MachineRuntimeState(recipe, 0, false);
     }
