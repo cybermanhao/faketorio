@@ -171,18 +171,25 @@ private void MachinesTickPostSettle()
 
 **`MachineTickPostSettle(id, proto)`**(`ElectricGrid.Settle()` 已经跑过,satisfaction 可读):
 
+**自我审查发现的修正**:装配机的配方是粘滞的(§5),但如果进度推进不看"输入库存现在到底有没有料",装配机在配方已设、原料还没备齐时会白白把整个 `EnergyRequiredTicks` 走一遍,到阈值那一刻才发现凑不齐、重置到 0——每次"尝试"都白白浪费一整个配方周期,而不是像现实机器那样"没料就停着不动、料一到就接着走"。修法:**进度推进本身也要求输入库存当前满足配方**(不是只在阈值那一刻才查),不满足就本 tick 冻结 `Progress`(不清零、不丢已有进度,单纯不涨)。这样第 5 步"完成前重校验"在单线程 tick 内其实必然通过(第 4 步刚确认过,同一次调用里没有其它代码会在两步之间改这个机器自己的输入库存)——但保留这次检查作为文档化的防御(未来机械臂/传送带若能从机器输入库存取走物品,这里的第二次检查是最后一道防线),不算 dead code。
+
 4. **进度推进**(仅当 `CurrentRecipeProtoId != -1` 且未 `Completed`——第 1 步 flush 失败、或本 tick 没匹配到配方,这里都是 no-op):
    ```csharp
    var recipe = (RecipePrototype)Prototypes.GetById(Machines.GetCurrentRecipe(id));
+   var inputInv = Inventories.Get(Inventories.GetInventoryId(id, 1));
+   bool satisfied = true;
+   foreach (var ing in recipe.ResolvedIngredients)
+       if (inputInv.CountOf(ing.ItemProtoId) < ing.Amount) { satisfied = false; break; }
+   if (!satisfied) continue;   // 缺料:本 tick 冻结进度,不清零、不重置配方,等原料备齐
+
    long threshold = (long)recipe.EnergyRequiredTicks << 16;
    var satisfaction = ElectricGrid.GetSatisfaction(id);
    long delta = proto.CraftingSpeed.Mul(satisfaction.Raw);  // Q16.16 定点"tick 数"增量
    if (Machines.GetProgress(id) < threshold) Machines.AddProgress(id, delta);
-   if (Machines.GetProgress(id) < threshold) return;   // 阻塞在阈值,不再累加(同 PlayerMine/PlayerCraft 的"停在阈值"约定)
+   if (Machines.GetProgress(id) < threshold) continue;   // 阻塞在阈值,不再累加(同 PlayerMine/PlayerCraft 的"停在阈值"约定)
    ```
-5. **完成前重校验 + 消耗原料**(紧接第 4 步,同一 tick 内):再次检查输入库存(role 1)是否仍满足 `recipe.ResolvedIngredients`(防御:未来若有机械臂/传送带能从机器输入库存里拿走物品,这里能抓到race)。
-   - 仍满足:逐项 `inputInv.Remove(ingredient.ItemProtoId, ingredient.Amount)`,`Machines.MarkCompleted(id)`(`CurrentRecipeProtoId` 不变,下一 tick 的第 1 步会尝试放output)。
-   - 不满足:`Machines.RestartCycle(id, clearRecipe: proto is FurnacePrototype)`(原料本来就没扣,无需归还;熔炉清空配方下一 tick 重新推导,装配机保留配方下一 tick 直接从 `Progress = 0` 重新开始同一配方——只要原料后来又备齐了)。
+5. **完成前重校验 + 消耗原料**(紧接第 4 步,同一 tick 内,复用同一个 `inputInv`):再次检查输入库存(role 1)是否仍满足 `recipe.ResolvedIngredients`——第 4 步刚检查过,单线程 tick 内不会有变化,这里必然通过,是给未来的防御,不是当前会失败的分支。
+   - 逐项 `inputInv.Remove(ingredient.ItemProtoId, ingredient.Amount)`,`Machines.MarkCompleted(id)`(`CurrentRecipeProtoId` 不变,下一 tick 的第 1 步会尝试放output)。
 
 `Step()` 里的位置:
 
@@ -241,7 +248,7 @@ Tick++
   - 电力不足降速:`ElectricGrid` 上该网络只登记一半供给,机器完成配方所需的 tick 数翻倍(验证 satisfaction 等比降速而非二元阻塞)。
   - 待机能耗:机器空转(没匹配到配方/没设配方)时仍能观察到 `ElectricGrid.GetSatisfaction`/网络需求侧统计包含它的 `EnergyUsageJPerTick`(验证第 3 步无条件登记)。
   - 输出堵塞进 pending:输出库存预先塞满,配方到期后 `Completed` 但不清空,`Progress` 不再变化,且待机能耗仍照常登记;腾出输出空间后下一 tick 自动 flush 并按机器类型重新匹配/继续同一配方。
-  - 重校验失败:配方进度中途,人为清空输入库存(直接调 `Inventories.Get(...).Remove`,模拟"物品被拿走"),到期时重校验失败,原料不需要归还(因为本来没扣);熔炉的 `CurrentRecipeProtoId` 清空(下一 tick 重新推导),装配机的 `CurrentRecipeProtoId` 保留(下一 tick 原料备齐后直接用同一配方重开)。
+  - 缺料冻结进度:装配机 `SetRecipe` 后立刻(输入库存还空着)`Step()` 若干 tick,`Progress` 保持 0、`CurrentRecipeProtoId` 不变(不清零、不重置);之后塞入原料,`Progress` 从 0 开始正常推进——验证第 4 步"缺料冻结、不重置"而非"缺料就整轮清空"。
 - **`DeterminismTests`** 追加:放熔炉 + 电线杆 + 发电机,`TransferToEntity` 塞矿 + 塞煤,跑够完成一整个配方周期的 tick 数,同命令两遍逐 tick 哈希全等;现有 golden 场景仍过。
 
 ## 11. 实施拆分
