@@ -19,7 +19,26 @@ public static class PrototypeLoader
         ResolveAndValidateMapGen(registry);
         ResolveAndValidateRecipesAndPlayer(registry);
         ResolveAndValidateElectric(registry);
+        ResolveAndValidateCraftingMachines(registry);
         return registry;
+    }
+
+    // AssignIds() 之后:校验熔炉/装配机的公共字段。不校验 Category 一定有配方存在——
+    // 允许先加机器后加配方的数据组织顺序,运行时匹配不到只是空转,不是加载期错误。
+    private static void ResolveAndValidateCraftingMachines(PrototypeRegistry registry)
+    {
+        for (int i = 0; i < registry.Count; i++)
+        {
+            if (registry.GetById(i) is not CraftingMachinePrototype m) continue;
+            if (string.IsNullOrEmpty(m.Category))
+                throw new InvalidDataException($"Crafting machine '{m.Name}': category must be non-empty");
+            if (m.InputSlots < 1)
+                throw new InvalidDataException($"Crafting machine '{m.Name}': inputSlots must be >= 1");
+            if (m.OutputSlots < 1)
+                throw new InvalidDataException($"Crafting machine '{m.Name}': outputSlots must be >= 1");
+            if (m.EnergyUsageJPerTick < 0)
+                throw new InvalidDataException($"Crafting machine '{m.Name}': energyUsage must be >= 0");
+        }
     }
 
     // AssignIds() 之后:校验电线杆字段,解析 + 校验发电机的燃料物品名。
@@ -247,6 +266,26 @@ public static class PrototypeLoader
                 TileHeight = GetInt(el, "tileHeight", 1),
                 PowerOutputJPerTick = el.TryGetProperty("powerOutput", out var po) ? Units.ParsePower(po.GetString()!) : 0L,
                 FuelItemName = el.GetProperty("fuelItemName").GetString()!,
+            }),
+            "furnace" => ValidateFootprint(new FurnacePrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                Category = el.GetProperty("category").GetString()!,
+                InputSlots = GetInt(el, "inputSlots", 0),
+                OutputSlots = GetInt(el, "outputSlots", 0),
+                EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var fEu) ? Units.ParsePower(fEu.GetString()!) : 0L,
+            }),
+            "assembling-machine" => ValidateFootprint(new AssemblingMachinePrototype
+            {
+                Name = name,
+                TileWidth = GetInt(el, "tileWidth", 1),
+                TileHeight = GetInt(el, "tileHeight", 1),
+                Category = el.GetProperty("category").GetString()!,
+                InputSlots = GetInt(el, "inputSlots", 0),
+                OutputSlots = GetInt(el, "outputSlots", 0),
+                EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var aEu) ? Units.ParsePower(aEu.GetString()!) : 0L,
             }),
             _ => throw new InvalidDataException($"Unknown prototype type '{type}' (name '{name}')"),
         };
