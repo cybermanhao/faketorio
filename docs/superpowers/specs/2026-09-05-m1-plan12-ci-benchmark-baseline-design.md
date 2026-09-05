@@ -26,7 +26,7 @@
 - 不做 Windows/macOS CI matrix(sim 层是纯 .NET 无平台依赖)。
 - 不做"录制真人操作回放"的命令序列文件格式(当前无 `Command` 序列化格式,不引入)。
 - 不改现有 `DeterminismTests` / `DeterministicHashTests`。
-- 场景构造**只用 public `Command`**,不做任何"直接往库存塞物品 / 直接改世界状态"的特权注入。
+- 场景构造主要用 public `Command`;**唯二**允许的建造期直接注入是 (a) `ElectricGrid.SetFuelBufferJ` 给发电机灌初始燃料缓冲、(b) `Inventory.Insert` 给每个单元的「铁料源」large-chest 灌初始铁矿石——都只在 `Build` 期间发生一次,建造完成后 step 阶段零注入。原因:sim 没有 burner 采矿机,全机械自举是死锁。
 
 ## 2. 组件与文件结构
 
@@ -154,7 +154,8 @@ public readonly record struct ScenarioPartFacts(
     IReadOnlyDictionary<string, int> EntityCountByType,  // prototype name -> count
     long RatedPowerSupplyJPerTick,   // 该 part 贡献的额定供给(PoleBackbone/IronUnit 为 0)
     long RatedPowerDemandJPerTick,   // 该 part 满载需求(PowerDistrict 为 0)
-    long MinableOreUnderDrills);     // 该 part 采矿机脚下可采总量(非 IronUnit 为 0)
+    long MinableOreUnderDrills,      // 该 part 采矿机脚下可采总量(非 IronUnit 为 0)
+    long SeededIronOre);             // 该 part 建造时直接注入的铁矿石(非 IronUnit 为 0)
 ```
 
 `ScenarioBuilder`:
@@ -180,18 +181,22 @@ public sealed record BuiltScenario(Simulation Sim, IReadOnlyList<ScenarioPartFac
 ### 4.2 场景布局(形态钉死,几何细节留给实现计划)
 
 - **固定世界种子**,一个选定常量。
-- **一个电力区**(`PowerDistrictPart`,放在原点附近一块锚定区域):一片煤矿田上铺 `P` 台燃料发电机,每台配 1 台煤矿机 + 1 台机械臂把煤从矿机搬进发电机燃料槽,配电线杆。`P` 由"满载总需求 / 单机发电"向上取整 + 裕度,公式在实现计划定。**发电机的燃料全程机械供给,无特权注入。**
-- **铁生产单元阵列**(`IronUnitPart × scale`):每单元 = 铁矿田上 4 台采矿机 → 传送带汇流(经过至少一个拐角,测 typed belt items + 线间交接)→ 2 台熔炉(recipe 铁矿石→铁板,测加工状态机 + satisfaction 降速)→ 机械臂上料(role 1)/ 下料(role 2)→ 输出箱。
-- **电线杆骨干**(`PoleBackbonePart`):把电力区和所有单元连成一张连通电网(测 `ElectricGrid.Settle` 在大图上的规模表现)。
+- **一个电力区**(`PowerDistrictPart`,放在原点附近一块锚定区域):`P` 台燃料发电机 + 电线杆。**没有 burner(直接烧煤)采矿机,因此"电力采矿机要电 → 发电机要煤 → 煤要电"在 t=0 是死锁**——发电机的燃料缓冲在**建造时一次性直接注入**:`sim.ElectricGrid.SetFuelBufferJ(genId, 满组煤焦耳数)`(50 × 4MJ = 200MJ ÷ 1500 J/tick ≈ 13.3 万 tick,远够默认 2 万 tick)。这是整个场景仅有的两处建造期直接注入之一(另一处见下)。建造完成后一切机械运转、无注入。不铺煤矿机 / 煤机械臂。
+- **铁生产单元阵列**(`IronUnitPart × scale`),每单元三条链,**解耦**(互不依赖对方产出,消除对程序化矿脉的脆弱依赖):
+  1. **采矿链**(真实压 P10 drill tick + 带推进):4 台 `electric-mining-drill`,各自**固定螺旋搜索**从单元锚点找一块脚下含铁矿的 2×2 落点;每台输出格上放一段传送带,把矿运几格进一个单元专属 `large-chest`「矿槽」。矿槽 20k tick 内可能被填满导致该 drill 输出堵塞 → 确定性,可接受。
+  2. **加工链**(真实压 P9 熔炉状态机 + 拐角交接 + 机械臂 role 1/2):一个单元专属 `large-chest`「铁料源」,建造时**直接注入**大量铁矿石(`inv.Insert(ironOre, N, stack)`,N 足够 2 万 tick 熔炼)——这是第二处建造期注入。机械臂从铁料源搬到一条水平带 → 拐角 → 竖直带 → 机械臂上料到 2 台 `stone-furnace`(role 1);熔炉自动匹配 `iron-ore→iron-plate` recipe,**不需要 `SetRecipe`**;机械臂从熔炉 role 2 下料到一条带 → 输出 `large-chest`。
+  3. **供电**:单元所有耗电实体(4 drill + 2 furnace + 机械臂)由骨干电网供电。
+- **电线杆骨干**(`PoleBackbonePart`):把电力区和所有单元连成一张连通电网(压 `ElectricGrid.Settle` 大图规模)。
 - **默认 `scale = 200`** → 约 5000 实体。
 
 ### 4.3 供给保证(`ScenarioSentinel`)
 
-生成后三条断言,任一失败 → `Build` 抛异常(bench exit 3 / 测试红),异常信息指明是哪一条:
+生成后四条断言,任一失败 → `Build` 抛异常(bench exit 3 / 测试红),异常信息指明是哪一条:
 
+0. **无拒绝**:`sim.RejectedCommandCount == 0`——建造期没有任何 `PlaceEntity` 因占位冲突被拒(螺旋搜索让 drill 落点漂移,单元跨距要留够;这条是几何没写崩的哨兵)。
 1. **实体计数**:`Σ EntitiesPlaced` 和各类型计数 == 按 `scale` 算出的预期常量/公式值。防生成器被无意改小。
-2. **矿量充足**:`Σ MinableOreUnderDrills` > `(采矿机总数) × (采矿速率, 物品/tick) × DefaultTicks`。防某个种子/世界生成改动让矿在 benchmark 窗口内被挖空、场景退化成空转。仅对 `scale == DefaultScale && ticks == DefaultTicks` 的等价规模严格要求;其它规模按比例。
-3. **供需匹配**:`Σ RatedPowerSupplyJPerTick` ≥ `Σ RatedPowerDemandJPerTick`。保证 satisfaction ≈ 1,让加工/搬运每 tick 都在干活,负载稳定。
+2. **矿量充足**:`Σ MinableOreUnderDrills` > `(在矿上的采矿机数) × MiningSpeed换算的物品/tick × DefaultTicks × 安全系数`。防某个种子/世界生成改动让 drill 全部落空、采矿链退化成纯空转。仅对 `scale == DefaultScale` 严格,其它规模按比例。
+3. **供需匹配**:`Σ RatedPowerSupplyJPerTick` ≥ `Σ RatedPowerDemandJPerTick`。保证 satisfaction ≈ 1,让加工/搬运每 tick 都在干活。`RatedPowerSupply` 按 `P × 发电机 PowerOutputJPerTick` 算(燃料缓冲已注入,视作恒定可用)。
 
 采矿机落位用**固定螺旋搜索**从单元锚点找最近的对应矿脉;搜索序固定 → 确定性。
 
@@ -252,7 +257,7 @@ public sealed record BuiltScenario(Simulation Sim, IReadOnlyList<ScenarioPartFac
 |---|---|
 | 全过 | `0` |
 | `finalHash` 或任一 `sampleHashes[t]` 与 golden 不符 | `1` |
-| `min(nsPerTick) > baselineNsPerTick × perfFailMultiplier`(默认 `3.0`) | `2` |
+| `min(nsPerTick) > baselineNsPerTick × perfFailMultiplier`(默认 `3.0`;`baselineNsPerTick <= 0` 视作"未校准" → 此条 SKIP,仅出报告) | `2` |
 | `ScenarioSentinel` 断言失败 / 参数非法 / golden 文件缺失或损坏(非 `--update-golden` 时) | `3` |
 | 趟间哈希序列不一致 | `4` |
 
@@ -321,7 +326,8 @@ public sealed record BuiltScenario(Simulation Sim, IReadOnlyList<ScenarioPartFac
 
 ### 6.3 基线怎么来 / 怎么更新
 
-- **首个实现任务**在 CI(`ubuntu-latest`)上跑一次 `--update-golden`,把测出的 `baselineNsPerTick` 连同哈希一起提交。**基线必须是 CI 环境的数**——3× 裕度要算在跑门禁的那台硬件上。
+- 实现期先提交 `golden.json`,其中哈希是实测值,但 `baselineNsPerTick` 置 `0`(= 未校准 → 性能门禁 SKIP,只出报告)。哈希门禁从第一个 PR 起即生效。
+- 合并前(或合并后一个 follow-up commit),人从**首次绿色 CI 的 `bench-report` artifact** 里读出 CI 环境实测的 `minNsPerTick`,写进 `golden.json` 的 `baselineNsPerTick` 并提交——此后性能门禁激活。**基线必须是 CI 环境的数**,3× 裕度要算在跑门禁的那台硬件上,本地数不作数。
 - 之后任何 PR 若合理地改变性能(优化变快 / 接受 <3× 的回归),开发者本地 `--update-golden` 后手动复核新 `baselineNsPerTick`,连同 diff 一起提交;`golden.json` 的 diff 就是 code review 里性能变化的签字点。
 - CI **不自动**改 `golden.json`(不给 `main` 加提交噪声,不给 workflow 授写权限)。
 - **非默认规模**(`--scale 1000` 手动压测):golden 无对应条目 → 门禁 SKIP,只出报告。
@@ -376,7 +382,7 @@ jobs:
 
 - **确定性铁律**:`IStepProfiler` 及其实现只持有 `long[]` 计时累加,**绝不**触碰任何进 `WriteState` 的状态;`_profiler` 不进 `WriteState`。sim 层不得因 `_profiler` 是否为 `null` 而走不同的**状态相关**分支(只允许"是否调用计时钩子"这一个差异)。测试 `ProfilerAttached_SameHashes` 强制这一点。
 - sim 层不引入 `float`/`double` 参与任何状态计算(计时换算成 ns 只在 Bench 项目里做,不回流)。
-- 场景构造只用 public `Command`,无特权状态注入。
+- 场景构造用 public `Command`,唯二例外:建造期一次性 `ElectricGrid.SetFuelBufferJ`(发电机燃料)+ `Inventory.Insert`(单元铁料源)。step 阶段零注入。
 - 所有场景遍历/提交按固定序,不依赖 `Dictionary` 迭代序。
 - `Faketorio.Sim` 保持零 Godot 依赖;`Faketorio.Sim.Bench` 只依赖 `Faketorio.Sim` + BCL,无额外 NuGet。
 - 新 CI 用 `actions/checkout@v4`、`actions/setup-dotnet@v4`(`8.0.x`)、`actions/upload-artifact@v4`,单平台 `ubuntu-latest`。
