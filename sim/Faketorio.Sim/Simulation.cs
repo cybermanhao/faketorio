@@ -676,7 +676,7 @@ public sealed class Simulation
                 int tx = MiningDrills.GetTargetX(id), ty = MiningDrills.GetTargetY(id);
                 bool exhausted = Resources.GetResourceAt(tx, ty).IsEmpty;
                 MiningDrills.ResetAfterFlush(id, exhausted ? -1 : tx, exhausted ? -1 : ty);
-                // 本 tick 内继续走到第 2 步,fits==true 时不 return。
+                // 本 tick 内继续走到第 2 步,placed==true 时不 return。
             }
             else
             {
@@ -725,6 +725,7 @@ public sealed class Simulation
         if (tx == -1 || MiningDrills.IsCompleted(id)) return;   // 无目标,或本 tick 刚 flush 失败仍在等
 
         var cell = Resources.GetResourceAt(tx, ty);
+        if (cell.IsEmpty) { MiningDrills.ResetAfterFlush(id, -1, -1); return; }   // 目标被别人挖空了(比如玩家手挖),下 tick 重新搜
         var resProto = (ResourcePrototype)Prototypes.GetById(cell.ResourceProtoId);
         long threshold = (long)resProto.MiningTimeTicks << 16;
 

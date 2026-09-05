@@ -104,7 +104,10 @@ public sealed class BeltLane
     public bool IsFrontReady => _gaps.Count > 0 && _gaps[0] == 0;
 
     // 队首物品的类型(只读,不摘除)。前置:IsFrontReady == true(同 RemoveFront 的前置)。
-    public int FrontItemProtoId => _itemProtoIds[0];
+    public int FrontItemProtoId
+        => IsFrontReady
+            ? _itemProtoIds[0]
+            : throw new InvalidOperationException("FrontItemProtoId read when front is not ready");
 
     // 移除队首物品(调用前必须已确认 IsFrontReady)。它腾出的空间并入新
     // 队首的前方 gap;_openIndex 重置为 0,因为后面的物品可能因此重新有

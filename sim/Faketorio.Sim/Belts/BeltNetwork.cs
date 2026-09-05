@@ -206,8 +206,6 @@ public sealed class BeltNetwork
 
     // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
     // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
-    // 从 src 的绝对位置快照里取前沿 >= cut 的物品,前沿减 cut,重建一条长
-    // backLen 的新 lane。前沿 < cut 的(前半段 / 被移格 / 跨界)一律不带进来。
     private static BeltLane SplitBackLane(BeltLane src, int cut, int backLen)
     {
         var back = new List<BeltLane.PositionedItem>();
