@@ -280,11 +280,20 @@ public static class BenchRunner
         long baseline = golden?.BaselineNsPerTick ?? 0L;
         double multiplier = golden?.PerfFailMultiplier ?? 0.0;
 
+        // phaseNs is cumulative over the whole profiled iteration; report it per-tick
+        // so the "ns" column shares units with minNsPerTick and the "%" column lands
+        // in a sane 0–100-ish band (may sum slightly over 100: the profiled iteration
+        // carries Stopwatch overhead and isn't the fastest of the set).
+        int ticks = opt.Ticks > 0 ? opt.Ticks : 1;
         var phases = phaseNs
-            .Select(kv => new PhaseCost(
-                kv.Key.ToString(),
-                kv.Value,
-                minNs > 0 ? kv.Value * 100.0 / minNs : 0.0))
+            .Select(kv =>
+            {
+                long perTickNs = kv.Value / ticks;
+                return new PhaseCost(
+                    kv.Key.ToString(),
+                    perTickNs,
+                    minNs > 0 ? perTickNs * 100.0 / minNs : 0.0);
+            })
             .OrderByDescending(p => p.Ns)
             .ToArray();
 
