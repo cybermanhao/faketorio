@@ -9,9 +9,21 @@ namespace Faketorio.Sim;   // 扁平——不是 Faketorio.Sim.Machines,理由�
 public sealed class Machines
 {
     private readonly Dictionary<EntityId, MachineRuntimeState> _states = new();
+    private readonly OrderedEntityIdList _order = new();
 
-    public void RegisterMachine(EntityId id) => _states[id] = new MachineRuntimeState(-1, 0, false);
-    public void UnregisterMachine(EntityId id) => _states.Remove(id);
+    public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
+
+    public void RegisterMachine(EntityId id)
+    {
+        _states[id] = new MachineRuntimeState(-1, 0, false);
+        _order.Add(id);
+    }
+
+    public void UnregisterMachine(EntityId id)
+    {
+        _states.Remove(id);
+        _order.Remove(id);
+    }
 
     public int GetCurrentRecipe(EntityId id) => _states.TryGetValue(id, out var s) ? s.CurrentRecipeProtoId : -1;
     public long GetProgress(EntityId id) => _states.TryGetValue(id, out var s) ? s.Progress : 0;
@@ -48,10 +60,8 @@ public sealed class Machines
     // 按 EntityId.Index 排序后写:index/代数/配方 id/进度/是否已完成。
     public void WriteState(IStateWriter writer)
     {
-        var ids = new List<EntityId>(_states.Keys);
-        ids.Sort((a, b) => a.Index.CompareTo(b.Index));
-        writer.Write(ids.Count);
-        foreach (var id in ids)
+        writer.Write(_order.Count);
+        foreach (var id in _order.Ids)
         {
             var s = _states[id];
             writer.Write(id.Index);
