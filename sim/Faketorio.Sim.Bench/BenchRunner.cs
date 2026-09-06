@@ -119,10 +119,12 @@ public static class BenchRunner
             if (!FoldHashes(ref finalHash, ref sampleHashes, run)) nondeterministic = true;
         }
 
-        // 7. one profiled iteration — its hashes fold into the same equality check.
+        // 7. one profiled iteration — its hashes fold into the same equality check,
+        // and it supplies phaseNs. Its timing number is Stopwatch-instrumented and
+        // always slower, so it is deliberately kept OUT of nsList (min/median are
+        // over the clean iterations only).
         var profiled = RunOnce(opt.Scale, opt.Ticks, sampleTicks, new StopwatchStepProfiler());
         if (!FoldHashes(ref finalHash, ref sampleHashes, profiled)) nondeterministic = true;
-        nsList.Add(profiled.NsPerTick);
 
         var phaseNs = profiled.PhaseNs ?? new Dictionary<StepPhase, long>();
         finalHash ??= profiled.FinalHash;
