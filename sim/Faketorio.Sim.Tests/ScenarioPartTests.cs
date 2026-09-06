@@ -56,7 +56,6 @@ public class ScenarioPartTests
         Assert.True(outInv.CountOf(ids.IronPlate) > 0,
             $"tick 预算跑完后输出箱应有铁板,实际 {outInv.CountOf(ids.IronPlate)}");
         Assert.True(facts.RatedPowerDemandJPerTick > 0);
-        Assert.True(facts.EntitiesPlaced >= 12);
         Assert.Equal(IronUnitPart.EntitiesPerUnit, facts.EntitiesPlaced);
         Assert.Equal(0, sim.RejectedCommandCount);
     }

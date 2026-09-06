@@ -75,12 +75,35 @@ public sealed class IronUnitPart : IScenarioPart
 
     public IronUnitPart(ScenarioProtoIds ids) => _ids = ids;
 
+    // --- 冶炼链的行/列锚点(相对 anchor)。几何只从这一块常量里调 ------------
+    // 相邻关系是硬约束,改的时候要一起改:
+    //   FurnaceX == FeedInserterX + 1        (上料机械臂 dropoff 落在熔炉西列)
+    //   FeedInserterX == VBeltX + 1          (上料机械臂 pickup 落在竖直带)
+    //   UnloadInserterX == FurnaceX + 2      (下料机械臂 pickup 落在熔炉东列)
+    //   OutBeltX == UnloadInserterX + 1      (下料机械臂 dropoff 落在输出带)
+    //   VBeltX == HBeltEndX + 1 && VBeltTopY == HBeltY   (拐角交接)
+    private const int SrcChestX = 16, SrcChestY = 0;          // 铁料源 large-chest(2x3)
+    private const int FeedBeltInserterX = 18;                 // insA:铁料源 -> 水平带
+    private const int HBeltY = 1;                             // 水平带所在行
+    private const int HBeltStartX = 19, HBeltEndX = 21;       // 水平带(东)首/末格,末格即线出口
+    private const int VBeltX = 22;                            // 竖直带所在列
+    private const int VBeltTopY = 1, VBeltBottomY = 6;        // 竖直带(南)入口/出口行
+    private const int FeedInserterX = 23;                     // insB/insC 所在列
+    private const int FurnaceX = 24;                          // 两台熔炉的锚点列(2x2 占 24..25)
+    private const int Furnace0Y = 1, Furnace1Y = 4;           // 两台熔炉的锚点行
+    private const int Furnace0RowY = 2, Furnace1RowY = 5;     // 机械臂对准的那一行(熔炉的第二行)
+    private const int UnloadInserterX = 26;                   // insD/insE 所在列
+    private const int OutBeltX = 27;                          // 输出带所在列
+    private const int OutBeltTopY = 2, OutBeltBottomY = 8;    // 输出带(南)入口/出口行
+    private const int OutInserterX = 27, OutInserterY = 9;    // insF:输出带出口 -> 输出箱
+    private const int OutChestX = 27, OutChestY = 10;         // 输出 large-chest(2x3)
+
     // 单元里"铁料源"大箱的锚点格。ScenarioBuilder 在 drain-step 之后按
     // facts.SeededIronOre 往这里注入铁矿。
-    public static (int X, int Y) IronSourceChestTile(int ax, int ay) => (ax + 16, ay + 0);
+    public static (int X, int Y) IronSourceChestTile(int ax, int ay) => (ax + SrcChestX, ay + SrcChestY);
 
     // 单元里输出大箱的锚点格。sentinel / 测试从这里读铁板产量。
-    public static (int X, int Y) OutputChestTile(int ax, int ay) => (ax + 27, ay + 10);
+    public static (int X, int Y) OutputChestTile(int ax, int ay) => (ax + OutChestX, ay + OutChestY);
 
     // 一个单元满载时的额定电力需求(与坐标无关)。带子/箱子/电线杆不耗电。
     public static long PerUnitRatedDemand(ScenarioProtoIds ids)
@@ -142,24 +165,24 @@ public sealed class IronUnitPart : IScenarioPart
         var (srcX, srcY) = IronSourceChestTile(ax, ay);
         Emit("large-chest", _ids.LargeChest, srcX, srcY);
 
-        Emit("inserter-basic", _ids.Inserter, ax + 18, ay + 1, East);   // insA:铁料源 -> 水平带
+        Emit("inserter-basic", _ids.Inserter, ax + FeedBeltInserterX, ay + HBeltY, East);   // insA:铁料源 -> 水平带
 
-        for (int x = 19; x <= 21; x++)                                   // 水平带(东)
-            Emit("transport-belt-basic", _ids.Belt, ax + x, ay + 1, East);
-        for (int y = 1; y <= 6; y++)                                     // 竖直带(南),拐角在 (22,1)
-            Emit("transport-belt-basic", _ids.Belt, ax + 22, ay + y, South);
+        for (int x = HBeltStartX; x <= HBeltEndX; x++)                   // 水平带(东)
+            Emit("transport-belt-basic", _ids.Belt, ax + x, ay + HBeltY, East);
+        for (int y = VBeltTopY; y <= VBeltBottomY; y++)                  // 竖直带(南),拐角在 (VBeltX, VBeltTopY)
+            Emit("transport-belt-basic", _ids.Belt, ax + VBeltX, ay + y, South);
 
-        Emit("inserter-basic", _ids.Inserter, ax + 23, ay + 2, East);   // insB:竖直带 -> f0
-        Emit("inserter-basic", _ids.Inserter, ax + 23, ay + 5, East);   // insC:竖直带 -> f1
-        Emit("stone-furnace", _ids.Furnace, ax + 24, ay + 1);           // f0
-        Emit("stone-furnace", _ids.Furnace, ax + 24, ay + 4);           // f1
-        Emit("inserter-basic", _ids.Inserter, ax + 26, ay + 2, East);   // insD:f0 -> 输出带
-        Emit("inserter-basic", _ids.Inserter, ax + 26, ay + 5, East);   // insE:f1 -> 输出带
+        Emit("inserter-basic", _ids.Inserter, ax + FeedInserterX, ay + Furnace0RowY, East);     // insB:竖直带 -> f0
+        Emit("inserter-basic", _ids.Inserter, ax + FeedInserterX, ay + Furnace1RowY, East);     // insC:竖直带 -> f1
+        Emit("stone-furnace", _ids.Furnace, ax + FurnaceX, ay + Furnace0Y);                     // f0
+        Emit("stone-furnace", _ids.Furnace, ax + FurnaceX, ay + Furnace1Y);                     // f1
+        Emit("inserter-basic", _ids.Inserter, ax + UnloadInserterX, ay + Furnace0RowY, East);   // insD:f0 -> 输出带
+        Emit("inserter-basic", _ids.Inserter, ax + UnloadInserterX, ay + Furnace1RowY, East);   // insE:f1 -> 输出带
 
-        for (int y = 2; y <= 8; y++)                                     // 输出带(南)
-            Emit("transport-belt-basic", _ids.Belt, ax + 27, ay + y, South);
+        for (int y = OutBeltTopY; y <= OutBeltBottomY; y++)              // 输出带(南)
+            Emit("transport-belt-basic", _ids.Belt, ax + OutBeltX, ay + y, South);
 
-        Emit("inserter-basic", _ids.Inserter, ax + 27, ay + 9, South);  // insF:输出带 -> 输出箱
+        Emit("inserter-basic", _ids.Inserter, ax + OutInserterX, ay + OutInserterY, South);  // insF:输出带 -> 输出箱
         var (outX, outY) = OutputChestTile(ax, ay);
         Emit("large-chest", _ids.LargeChest, outX, outY);
 
