@@ -1,0 +1,2 @@
+*.json text eol=lf
+bench/golden.json text eol=lf

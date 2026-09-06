@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Faketorio.Sim\Faketorio.Sim.csproj" />
+    <ProjectReference Include="..\Faketorio.Sim.Bench\Faketorio.Sim.Bench.csproj" />
   </ItemGroup>
 
   <ItemGroup>
