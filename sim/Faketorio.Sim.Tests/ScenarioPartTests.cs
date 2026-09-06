@@ -6,11 +6,10 @@ namespace Faketorio.Sim.Tests;
 
 public class ScenarioPartTests
 {
+    // 用 Task 5 选定的世界种子(基准场景同一个种子),这样这里的实测注释和
+    // ScenarioBuilder 里的钉死常量描述的是同一个世界。
     private static Simulation NewSim()
-        => new(PrototypeLoader.LoadFromDirectory("data/base"), ScenarioBuilderSeedForTests());
-
-    // Task 5 会把真正选定的种子写进 ScenarioBuilder.WorldSeed;在那之前测试用同一个候选值。
-    private static long ScenarioBuilderSeedForTests() => 20260905L;
+        => new(PrototypeLoader.LoadFromDirectory("data/base"), ScenarioBuilder.WorldSeed);
 
     private static Command Place(int protoId, int x, int y, byte rot = 0) => new()
     {
