@@ -82,11 +82,12 @@ public static class ScenarioBuilder
     private const long PerUnitRatedDemandJPerTick = 9498;
     private const long GeneratorOutputJPerTick = 1500;
 
-    public static BuiltScenario Build(int scale, long seed = WorldSeed)
+    public static BuiltScenario Build(
+        int scale, long seed = WorldSeed, Faketorio.Sim.Profiling.IStepProfiler? profiler = null)
     {
         if (scale < 1) throw new ArgumentOutOfRangeException(nameof(scale), scale, "至少 1 个单元");
 
-        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed);
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), seed, profiler);
         var ids = new ScenarioProtoIds(sim.Prototypes);
 
         // 钉死的数值必须和真实 prototype 一致,否则 ExpectedEntities 的规模公式失效。

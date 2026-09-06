@@ -1,3 +1,12 @@
-// Faketorio 模拟层 benchmark。完整 CLI 见 Task 7。
-Console.WriteLine("faketorio bench — 用法见 bench/README.md(尚未实现 CLI)");
-return 0;
+// Faketorio 模拟层 benchmark CLI —— 计时协议 + 门禁 + 退出码见 BenchRunner。
+using Faketorio.Sim.Bench;
+
+try
+{
+    return BenchRunner.Run(BenchOptions.Parse(args), Console.Out);
+}
+catch (ArgumentException e)
+{
+    Console.Error.WriteLine(e.Message);
+    return 3;
+}
