@@ -31,4 +31,18 @@ public class ActiveIdListTests
         Assert.Equal(new[] { 2, 4, 8 }, Idx(m.ActiveIds));
         Assert.Equal(3, m.ActiveIds.Single(x => x.Index == 4).Generation);
     }
+
+    [Fact]
+    public void MiningDrills_ActiveIds_TracksRegisterUnregister_InIndexOrder()
+    {
+        var d = new MiningDrills();
+        d.RegisterDrill(new EntityId(7, 1));
+        d.RegisterDrill(new EntityId(3, 1));
+        d.RegisterDrill(new EntityId(7, 1));   // 重复,忽略
+        Assert.Equal(new[] { 3, 7 }, Idx(d.ActiveIds));
+        d.UnregisterDrill(new EntityId(3, 1));
+        Assert.Equal(new[] { 7 }, Idx(d.ActiveIds));
+        d.UnregisterDrill(new EntityId(42, 1));   // 没注册
+        Assert.Equal(new[] { 7 }, Idx(d.ActiveIds));
+    }
 }

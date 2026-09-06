@@ -657,12 +657,10 @@ public sealed class Simulation
     // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
     private void MiningDrillsTickPreSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in MiningDrills.ActiveIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPreSettle(id, proto, data.X, data.Y, data.Rotation);
         }
     }
@@ -733,12 +731,10 @@ public sealed class Simulation
     // 采矿:进度推进 + 产出(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MiningDrillsTickPostSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in MiningDrills.ActiveIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPostSettle(id, proto);
         }
     }
