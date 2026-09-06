@@ -1,3 +1,5 @@
+using Faketorio.Sim.Prototypes;
+
 namespace Faketorio.Sim.Bench.Scenario;
 
 // 场景搭建失败(几何冲突 / 规模不符 / 电力不够 / 矿太薄)时抛这个。
@@ -34,15 +36,27 @@ public static class ScenarioSentinel
     public const int DefaultScalePoles = 3940;
 
     // 一台采矿机在 DefaultTicks 内、满 satisfaction 下最多能挖走的矿数:
-    // ResourcePrototype.MiningTimeTicks = 60,MiningSpeed = 1.0 -> 每 60 tick 1 个。
+    // MiningDrillPrototype.MiningSpeed = 1.0,所以每 ResourcePrototype.MiningTimeTicks
+    // 个 tick 出 1 个矿(见 Simulation.MiningDrillTickPostSettle 的 progress 阈值)。
+    //
+    // MiningTimeTicks 是 data/base 里 miningTimeSeconds 加载出来的真实值,**不钉死**:
+    // 钉一个字面量 60 在这里,恰恰就是这个守卫存在的意义所反对的"数据悄悄漂了没人发现"。
+    // 所以现算——data 改了,下界跟着改,守卫仍然守的是同一件事。
     //
     // 【与 task brief 的偏差,故意的】brief 写的是
     //     totals.MinableOre > totals.FedDrillCount * DefaultTicks
     // 即"每台 fed drill 脚下要有 20000 个矿"。这在 data/base 下算术上不可能:
     // richnessBase 400 + richnessScale 6000 * excess,单格上限 ~2280,2x2 上限
     // ~9120。真正想表达的是"矿量不是瓶颈,基准跑的是机器不是空转",所以这里
-    // 用真实的采矿速率上界 DefaultTicks / 60 = 333 作下界。
-    public const long MaxOrePerDrillOverDefaultTicks = ScenarioBuilder.DefaultTicks / 60;
+    // 用真实的采矿速率上界 DefaultTicks / MiningTimeTicks(当前数据 = 333)作下界。
+    public static long MaxOrePerDrillOverDefaultTicks(Simulation sim)
+    {
+        int miningTimeTicks = sim.Prototypes.Get<ResourcePrototype>("iron-ore").MiningTimeTicks;
+        if (miningTimeTicks <= 0)
+            throw new ScenarioSentinelException(
+                $"data/base 漂了:iron-ore 的 MiningTimeTicks = {miningTimeTicks},采掘速率上界算不出来");
+        return ScenarioBuilder.DefaultTicks / miningTimeTicks;
+    }
 
     public static void Assert(int scale, Simulation sim, ScenarioTotals totals)
     {
@@ -83,7 +97,7 @@ public static class ScenarioSentinel
 
         // 每台 fed drill 脚下至少一格矿,而 data/base 的 richnessBase = 400 > 333,
         // 所以只要 fed drill 存在,这条在任何 scale 下都该成立。
-        long oreFloor = (long)totals.FedDrillCount * MaxOrePerDrillOverDefaultTicks;
+        long oreFloor = (long)totals.FedDrillCount * MaxOrePerDrillOverDefaultTicks(sim);
         if (totals.FedDrillCount > 0 && totals.MinableOre <= oreFloor)
             throw new ScenarioSentinelException(
                 $"sentinel #2(矿量充裕):脚下可采矿 {totals.MinableOre} <= {oreFloor}" +
