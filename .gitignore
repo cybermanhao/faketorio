@@ -1,5 +1,8 @@
 # Godot
 game/.godot/
+game/.mono/
+game/bin/
+game/obj/
 *.uid
 
 # .NET

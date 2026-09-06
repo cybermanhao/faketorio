@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - run: dotnet test sim/Faketorio.Sim.Tests -c Release
+      - run: dotnet test Faketorio.sln -c Release
 
   bench:
     runs-on: ubuntu-latest
