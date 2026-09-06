@@ -59,4 +59,72 @@ public class ScenarioPartTests
         Assert.Equal(IronUnitPart.EntitiesPerUnit, facts.EntitiesPlaced);
         Assert.Equal(0, sim.RejectedCommandCount);
     }
+
+    [Fact]
+    public void PowerDistrict_ReachesFullSatisfaction()
+    {
+        var sim = NewSim();
+        var ids = new ScenarioProtoIds(sim.Prototypes);
+
+        // 3 台发电机(4500 J/tick)盖不住一个单元的 9498 J/tick 满载需求,
+        // 拿 7 台(10500 J/tick)才能把 satisfaction 顶到 1。
+        var pd = new PowerDistrictPart(ids, generatorCount: 7);
+        var facts = pd.Place(sim, 0, 0);
+
+        // 一个假消费者(一个铁生产单元)靠这片电供电。发电区锚点 (0,0),
+        // 杆链最右一根在 rel (20,2);单元放在 (24,0),西侧接入杆 (25,2) 落在
+        // 连线距离 5 之内 -> 并入同一张网。
+        var unit = new IronUnitPart(ids);
+        unit.Place(sim, 24, 0);
+        sim.Step();  // drain
+
+        foreach (var (gx, gy) in pd.GeneratorTiles)
+            sim.ElectricGrid.SetFuelBufferJ(sim.World.GetEntityAt(gx, gy), 200L * 1_000_000L);
+
+        for (int t = 0; t < 300; t++) sim.Step();
+
+        // 单元里一个耗电实体(rel (23,2) = 上料机械臂 insB)的 satisfaction 应接近 1。
+        var powered = sim.World.GetEntityAt(24 + 23, 0 + 2);
+        Assert.True(sim.ElectricGrid.GetSatisfaction(powered).Raw >= 60000,
+            $"satisfaction={sim.ElectricGrid.GetSatisfaction(powered).Raw}");
+        Assert.True(facts.RatedPowerSupplyJPerTick > 0);
+        Assert.Equal(0, facts.RatedPowerDemandJPerTick);
+        Assert.Equal(0, facts.SeededIronOre);
+    }
+
+    [Fact]
+    public void PoleBackbone_ConnectsTwoUnitsToPower()
+    {
+        var sim = NewSim();
+        var ids = new ScenarioProtoIds(sim.Prototypes);
+
+        var pd = new PowerDistrictPart(ids, generatorCount: 3);
+        pd.Place(sim, 0, 0);
+
+        var u0 = new IronUnitPart(ids); u0.Place(sim, 10, 0);
+        var u1 = new IronUnitPart(ids); u1.Place(sim, 10 + IronUnitPart.CellWidth + 4, 0);
+
+        // 骨干走 y=-2 的净空走廊(单元/发电区实体全在 y>=0),经每个单元西侧
+        // 接入杆的 x 上方穿过:district 杆 (2,2) <- (2,-2) 桥进电,(2,-2)..(47,-2)
+        // 每 6 格一根,u0 西杆 (11,2) / u1 西杆 (51,2) 都落在连线距离内。
+        var backbone = new PoleBackbonePart(ids, new[]
+        {
+            (2, -2),
+            (10 + 1, -2),
+            (10 + IronUnitPart.CellWidth + 4 + 1, -2),
+        });
+        backbone.Place(sim, 0, 0);
+        sim.Step();
+
+        foreach (var (gx, gy) in pd.GeneratorTiles)
+            sim.ElectricGrid.SetFuelBufferJ(sim.World.GetEntityAt(gx, gy), 200L * 1_000_000L);
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var f0 = sim.World.GetEntityAt(10 + 23, 0 + 2);
+        var f1 = sim.World.GetEntityAt(10 + IronUnitPart.CellWidth + 4 + 23, 0 + 2);
+        Assert.True(sim.ElectricGrid.GetSatisfaction(f0).Raw > 0,
+            $"u0 satisfaction={sim.ElectricGrid.GetSatisfaction(f0).Raw}");
+        Assert.True(sim.ElectricGrid.GetSatisfaction(f1).Raw > 0,
+            $"u1 satisfaction={sim.ElectricGrid.GetSatisfaction(f1).Raw}");
+    }
 }
