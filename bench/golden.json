@@ -7,15 +7,15 @@
     3750,
     5000
   ],
-  "finalHash": "0x55A27B3F18AB1E7B",
+  "finalHash": "0x18D2B1C806C572FB",
   "sampleHashes": {
-    "1250": "0x58D37929F0F242F8",
-    "2500": "0x992001FFD67F586F",
-    "3750": "0x44D8EFE70AAE723E",
-    "5000": "0x55A27B3F18AB1E7B"
+    "1250": "0x0D8FF4AB77DA8D58",
+    "2500": "0xF9869102CF23C86F",
+    "3750": "0x2A706A4747320EDE",
+    "5000": "0x18D2B1C806C572FB"
   },
   "baselineNsPerTick": 0,
   "perfFailMultiplier": 3,
-  "recordedAtCommit": "31cc69b",
-  "recordedAtUtc": "2026-09-06T01:41:22.6957124Z"
+  "recordedAtCommit": "4ca20a3",
+  "recordedAtUtc": "2026-09-06T19:09:42.9817839Z"
 }

@@ -238,4 +238,25 @@ public sealed class BeltNetwork
         3 => (-1, 0),
         _ => throw new ArgumentOutOfRangeException(nameof(d)),
     };
+
+    // 一条 line 的两条 lane 有固定的左右身份(相对行进方向):
+    //   LaneA = 行进方向左侧, LaneB = 右侧。
+    //   "右侧" = 行进方向 (bdx, bdy) 的右手法线 (-bdy, bdx)
+    //   (屏幕 y 向下:北行 -> 东为右)。渲染器 WorldView.DrawLaneItems 按同一约定
+    //   把 A 画在左、B 画在右。
+    //
+    // 物品源(采矿机产出 / 机械臂放件)往传送带塞物品时按几何关系选边:
+    //   源朝向 (sfx, sfy) = 源指向传送带那格的单位向量(= Delta(源.Rotation))。
+    //   · 源朝向与行进方向平行(同向或逆向)-> 放右侧 lane。
+    //   · 源朝向与行进方向正交(源在带侧面)-> 放"远端" lane
+    //     (离源较远那条 = 源朝向继续往前的那一侧)。
+    // 四方向网格 + 合法建造下,两个单位向量非平行即正交,故只有这两个分支。
+    //
+    // 返回 true = 用 LaneB(右), false = 用 LaneA(左)。
+    public static bool FeedsRightLane(int sfx, int sfy, int bdx, int bdy)
+    {
+        int dot = sfx * bdx + sfy * bdy;
+        if (dot != 0) return true;                    // 平行(同向 / 逆向)-> 右侧
+        return sfx * -bdy + sfy * bdx > 0;            // 正交 -> 远端(源朝向那一侧)
+    }
 }

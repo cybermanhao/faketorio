@@ -1070,6 +1070,80 @@ public class SimulationTests
     }
 
     [Fact]
+    public void MiningDrill_ParallelToBelt_OutputsToRightLane()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        sim.Submit(new Command { Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 2, Y = 2, Rotation = 1 });                          // 带也向东 -> 平行
+        sim.Step();
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        Assert.True(line.LaneB.Count > 0, "平行进料应落右侧 LaneB");
+        Assert.Equal(0, line.LaneA.Count);                          // 不回退到另一条
+    }
+
+    [Fact]
+    public void MiningDrill_OrthogonalToBelt_OutputsToFarLane()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        sim.Submit(new Command { Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 2, Y = 2, Rotation = 2 });                          // 带向南 -> 与"朝东"正交
+        sim.Step();
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        // 带向南行进,右手法线 = 西;采矿机在带西侧往东怼 -> 远端在东 = 左侧 LaneA。
+        Assert.True(line.LaneA.Count > 0, "正交进料应落远端 LaneA");
+        Assert.Equal(0, line.LaneB.Count);
+    }
+
+    [Fact]
+    public void Inserter_ParallelToBelt_DropsToRightLane()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));                          // 抓取源
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));          // 机械臂朝东
+        sim.Submit(PlaceBelt(sim, 2, 2, 1));                        // 下游带向东 -> 平行
+        sim.Step();
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)))
+            .Insert(iron, 3, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        Assert.True(line.LaneB.Count > 0, "平行放件应落右侧 LaneB");
+        Assert.Equal(0, line.LaneA.Count);                          // 不回退到另一条
+    }
+
+    [Fact]
+    public void Inserter_OrthogonalToBelt_DropsToFarLane()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));          // 机械臂朝东
+        sim.Submit(PlaceBelt(sim, 2, 2, 2));                        // 下游带向南 -> 正交
+        sim.Step();
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)))
+            .Insert(iron, 3, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+        for (int t = 0; t < 200; t++) sim.Step();
+
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        // 带向南,右手法线 = 西;机械臂在带西侧朝东放 -> 远端在东 = 左侧 LaneA。
+        Assert.True(line.LaneA.Count > 0, "正交放件应落远端 LaneA");
+        Assert.Equal(0, line.LaneB.Count);
+    }
+
+    [Fact]
     public void MiningDrill_NoTargetInFootprint_NeverProgresses()
     {
         var sim = NewSim();

@@ -555,4 +555,57 @@ public class BeltNetworkTests
         int backCount = net.GetLine(net.GetLineAt(2, 0)).LaneA.Count;
         Assert.Equal(0, frontCount + backCount);
     }
+
+    // --- FeedsRightLane: 按几何关系给物品源选传送带 lane ---
+    // true = LaneB(行进方向右侧), false = LaneA(左侧)。
+
+    [Fact]
+    public void FeedsRightLane_ParallelSameDirection_PicksRight()
+    {
+        // 源朝东,带向东流(采矿机直出 / 机械臂顺流喂)
+        var (b0, b1) = BeltNetwork.Delta(E);
+        var (s0, s1) = BeltNetwork.Delta(E);
+        Assert.True(BeltNetwork.FeedsRightLane(s0, s1, b0, b1));
+    }
+
+    [Fact]
+    public void FeedsRightLane_ParallelOppositeDirection_PicksRight()
+    {
+        // 源朝西,带向东流 —— 平行但逆向,仍算"同向进料" -> 右侧
+        var (b0, b1) = BeltNetwork.Delta(E);
+        var (s0, s1) = BeltNetwork.Delta(W);
+        Assert.True(BeltNetwork.FeedsRightLane(s0, s1, b0, b1));
+    }
+
+    [Fact]
+    public void FeedsRightLane_OrthogonalSourceOnLeft_PicksFarLaneRight()
+    {
+        // 带向东流(右手法线 = 南)。源朝南 = 源站在带北侧往南怼 ->
+        // 远端(南侧 = 右侧)-> LaneB
+        var (b0, b1) = BeltNetwork.Delta(E);
+        var (s0, s1) = BeltNetwork.Delta(S);
+        Assert.True(BeltNetwork.FeedsRightLane(s0, s1, b0, b1));
+    }
+
+    [Fact]
+    public void FeedsRightLane_OrthogonalSourceOnRight_PicksFarLaneLeft()
+    {
+        // 带向东流。源朝北 = 源站在带南侧往北怼 -> 远端(北侧 = 左侧)-> LaneA
+        var (b0, b1) = BeltNetwork.Delta(E);
+        var (s0, s1) = BeltNetwork.Delta(N);
+        Assert.False(BeltNetwork.FeedsRightLane(s0, s1, b0, b1));
+    }
+
+    [Fact]
+    public void FeedsRightLane_OrthogonalIsMirroredAcrossBeltAxis()
+    {
+        // 对每个行进方向:源朝"右手侧"应落 LaneB,源朝"左手侧"应落 LaneA。
+        foreach (byte dir in new byte[] { N, E, S, W })
+        {
+            var (bx, by) = BeltNetwork.Delta(dir);
+            int rnx = -by, rny = bx;         // 右手法线
+            Assert.True(BeltNetwork.FeedsRightLane(rnx, rny, bx, by));
+            Assert.False(BeltNetwork.FeedsRightLane(-rnx, -rny, bx, by));
+        }
+    }
 }
