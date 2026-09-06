@@ -175,14 +175,45 @@ public partial class WorldView : Node2D
             float pr = Mathf.Min(ppt * 0.3f, 20f);
             DrawCircle(p, pr, new Color("#e8e8e8"));
             DrawArc(p, pr, 0f, Mathf.Tau, 24, new Color(0.1f, 0.1f, 0.1f, 0.9f), 1.5f, true);
+            if (sim.Player.Walking)
+            {
+                // 八向单位向量(屏幕坐标,y 向下),与 sim Player.WalkDelta 一致。
+                (float fx, float fy) = sim.Player.WalkDir switch
+                {
+                    0 => (0f, -1f), 1 => (1f, -1f), 2 => (1f, 0f), 3 => (1f, 1f),
+                    4 => (0f, 1f), 5 => (-1f, 1f), 6 => (-1f, 0f), 7 => (-1f, -1f),
+                    _ => (0f, 0f),
+                };
+                var dirv = new Vector2(fx, fy);
+                if (dirv != Vector2.Zero)
+                    DrawLine(p, p + dirv.Normalized() * (pr * 1.6f), new Color("#ffd24a"), 2f);
+            }
         }
 
-        // 7. 光标格高亮
+        // 7. 光标格高亮 —— 手挖按住时按"够不够得着"着色。
         {
             var (hx, hy) = _build.HoverTile;
             var s = t.TileToScreen(hx, hy).ToGodot();
             var r = new Rect2(s, new Vector2(ppt, ppt));
-            DrawRect(r, _build.LastCommandRejected ? new Color(1, 0.3f, 0.3f) : new Color(1, 1, 1, 0.8f), false, 2f);
+
+            Color col;
+            if (_build.LastCommandRejected)
+            {
+                col = new Color(1, 0.3f, 0.3f);
+            }
+            else if (Input.IsActionPressed("player_mine"))
+            {
+                int reach = sim.Prototypes.Get<PlayerPrototype>("player").ReachSubTiles;
+                long ddx = sim.Player.X - ((long)hx * 256 + 128);
+                long ddy = sim.Player.Y - ((long)hy * 256 + 128);
+                bool inReach = ddx * ddx + ddy * ddy <= (long)reach * reach;
+                col = inReach ? new Color(0.4f, 1f, 0.5f, 0.9f) : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+            }
+            else
+            {
+                col = new Color(1, 1, 1, 0.8f);
+            }
+            DrawRect(r, col, false, 2f);
         }
 
         // 8. 相机模式 HUD —— 左上角文字,M 键切换时肉眼可见。
