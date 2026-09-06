@@ -1,5 +1,7 @@
 # M1 Plan 14 — Godot 表现层 v1 Implementation Plan
 
+> **状态:✅ 已合并进 `main`(本地 `--no-ff`)。** SDD 全任务 + 最终整分支审查完成;§7.4 人工 F5 验收通过(3 轮修复:相机退出渲染路径 `36d03e6`、矿脉生成移出 `_Draw` `9fc4dd8`、bulk `PeekChunk` 消 O(n²) 卡死 `9df8c19`、`_oreCache` 有界淘汰 `e2636f0`)。跨 plan 进度看 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给 `Faketorio.Sim` 加第一个 Godot 表现层子项:只读渲染世界(网格/地块/矿脉/实体占位色块/传送带物品/玩家)+ 双模式相机骨架(Follow / Free 地图模式)+ 最小放置命令(左键放 wooden-chest / 右键拆)。
