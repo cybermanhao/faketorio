@@ -25,7 +25,7 @@
 | **P11** 机械臂(belt lane ↔ inventory 抓/放,转速模型 + satisfaction 降速 + 两段摆臂,按子格位置抓/插传送带) | ✅ 已合并·已验证 | `947abd8`..`7a06760` |
 | 横切 · **typed belt items** | ✅ 已合并(并入 P10 Task 1) | `039748f` |
 | 横切 · RotateEntity 命令 | ⬜ 未立项(单独小 plan;P10/P11 已用"放置期 `Command.Rotation` 定死"绕过,只有想让玩家事后转向才需要) | — |
-| 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | ⬜ 未立项 · **P9/P10/P11 都是两趟全量扫描 + 每 tick 重查 Inventories/Prototypes/Belts,是天然的优化落点**;P11 最终审查另指出 `InserterTickPostSettle` 里 `delta` 在阶段 A 也无条件算(每空闲机械臂每 tick 一次多余 `GetSatisfaction` 查表),可顺手收 | — |
+| 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | 🟡 **P13:换迭代源已合并**(4 容器 `ActiveIds` / `GeneratorIds`,8 个 tick 循环从全实体扫描改成遍历活跃 id 列表;`delta` 挪出机械臂空闲阶段 A)· **真休眠 / 唤醒待后续独立子项** | `3d91b48`..`<merge>` |
 | 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ✅ 已合并·已验证(P12) | `c42ef1d`..`66bce92` |
 | 横切 · "销毁掉落物品"统一处理(所有实体) | ⬜ 未立项 · 目前全代码库一致丢弃(传送带/箱子/P9 完成品/P10 pending/P11 手上物品);P11 最终审查:**无电机械臂仍会执行阶段 A 抓取**,物品能被死机械臂从传送带上拿走并卡在手里(确定、有界、来电即恢复,但与 Factorio 不符),和"销毁掉落"一起考虑 | — |
 | 横切 · 机器 role-1 输入库存加物品过滤 | ⬜ 未立项 · P9 model gap:机器输入库存无过滤,机械臂会往熔炉输入里推任何物品;P11 是第一个能自动大规模触发它的系统 | — |
@@ -34,7 +34,9 @@
 
 P12 执行期确认:①计划里默认基准规模(scale 200 / 20000 tick)实测 ~28 分钟,对每 PR 的 CI 不可用——裁定 R5 缩到 **scale 50 / 5000 tick / 3 iterations**(~2–3 分钟),`ScenarioSentinel` 的 10 个 `DefaultScale*` 固定常量随之在 scale 50 重新实测钉死;`--scale`/`--ticks` 仍留作手动重压测。②`data/base` 铁矿石全局覆盖率仅 ~11%,一个单元的 4 台采矿机落在同一个 64 格噪声晶格里高度相关,实测 fed drill 只有 ~13%(scale 50)——裁定 R3 接受:采矿链(fed + idle 两条路径)、传送带、熔炉、机械臂、大电网结算都仍被压到,golden 哈希照样能抓任何行为变化;真要拉高需单独立项做矿脉层增强。③`bench/golden.json` 的 `baselineNsPerTick` 以 `0`(未校准)出厂——性能红线的"退化告警"这一半是**待激活**的:需要人从首次绿色 CI 的 `bench-report` artifact 读出 `minNsPerTick` 填回并提交(`bench/README.md` 有流程);哈希红线从合并起即生效。④`--require-gates`(CI 已带):防止有人改了 `DefaultScale`/`DefaultTicks` 或 golden 的 `scale`/`ticks` 却没重生成 golden——那样门禁本会静默 SKIP、CI 假绿,现在改成 exit 3 报红。⑤`IStepProfiler` 的分阶段计时确认了 ~85% 的每 tick 成本在 `Inserters`/`MiningDrills`/`Machines`/`Electric` 四个 O(n) 全量扫描里(scale 50:机械臂 44% / 采矿机 29% / 加工 15% / 电网 12%,传送带 <0.5%)——**这就是实体休眠优化的量化落点和对照台架**。
 
-下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)已完成。剩余候选(无强依赖顺序,按价值/成本挑):① 实体休眠 / 活跃列表(§5.3 性能地基,P9/P10/P11 三个两趟扫描是共同落点;P12 的分阶段计时已量化优先级);② 机器输入库存加过滤 + "销毁掉落物品"统一处理;③ `RotateEntity` 命令(仅在要让玩家事后转向时);④ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,合并后从首次绿色 CI artifact 回填);⑤ 转向表现层(Godot 工程接线 + 只读渲染 + 命令 UI),不在本 sim 计划系列内,需单独 brainstorm。
+P13 执行期确认:换迭代源(4 容器 `ActiveIds`)对 bench(scale 50 / 5000 tick)的即时 UPS 收益**很小**:`minNsPerTick` 5_031_616 → 4_972_334(-1.2%),四个目标阶段 Machines -2.9% / Electric -2.1% / MiningDrills -0.3% / Inserters +0.1%(噪声内)。原因:scale 50 下 ~3050 个实体几乎全部存活,旧 `for i in 0..Capacity` 循环体本就每 tick 跑满 ~3050 次,省掉的只是 `TryGetById` + 类型检查(每次 ~10–15ns,JIT 很便宜);每个阶段的成本大头是**真实的逐实体工作**(传送带格查询、`GetLineAt`/`IndexOf`、库存扫描、`GetSatisfaction`),不是扫描开销 —— P12 的分阶段计时量的是"阶段耗时"不是"扫描耗时"。P13 正确的定位(spec §1)是"换路 + 清理",是 ② 真休眠子项(整个跳过空闲实体)的**前置**,大收益在那里。零 golden 哈希变化(纯性能改造成立)。
+
+下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)+ 活跃列表换路(P13)已完成。剩余候选(无强依赖顺序,按价值/成本挑):① **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;单独 brainstorm);② 机器输入库存加过滤 + "销毁掉落物品"统一处理;③ `RotateEntity` 命令(仅在要让玩家事后转向时);④ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,合并后从首次绿色 CI artifact 回填);⑤ 转向表现层(Godot 工程接线 + 只读渲染 + 命令 UI),不在本 sim 计划系列内,需单独 brainstorm。
 
 ## 0. 背景
 

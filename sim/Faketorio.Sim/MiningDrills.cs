@@ -10,9 +10,23 @@ namespace Faketorio.Sim;   // 扁平——不是 Faketorio.Sim.MiningDrills,同 
 public sealed class MiningDrills
 {
     private readonly Dictionary<EntityId, DrillRuntimeState> _states = new();
+    private readonly OrderedEntityIdList _order = new();
 
-    public void RegisterDrill(EntityId id) => _states[id] = new DrillRuntimeState(-1, -1, 0, false, 0);
-    public void UnregisterDrill(EntityId id) => _states.Remove(id);
+    public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
+    internal List<EntityId> ActiveIdsList => _order.IdsList;
+    internal int StateCount => _states.Count;
+
+    public void RegisterDrill(EntityId id)
+    {
+        _states[id] = new DrillRuntimeState(-1, -1, 0, false, 0);
+        _order.Add(id);
+    }
+
+    public void UnregisterDrill(EntityId id)
+    {
+        _states.Remove(id);
+        _order.Remove(id);
+    }
 
     public int GetTargetX(EntityId id) => _states.TryGetValue(id, out var s) ? s.TargetX : -1;
     public int GetTargetY(EntityId id) => _states.TryGetValue(id, out var s) ? s.TargetY : -1;
@@ -45,15 +59,16 @@ public sealed class MiningDrills
     // 由调用方决定——矿格挖空传 (-1,-1)(下 tick 重新搜),没挖空传原目标
     // (继续挖同一格)。
     public void ResetAfterFlush(EntityId id, int targetX, int targetY)
-        => _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0);
+    {
+        _ = _states[id];   // 前置:已注册(throw-on-missing,同 SetTarget/AddProgress/MarkCompleted)
+        _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0);
+    }
 
     // 按 EntityId.Index 排序后写:index/代数/目标坐标/进度/是否已完成/待放置物品 id。
     public void WriteState(IStateWriter writer)
     {
-        var ids = new List<EntityId>(_states.Keys);
-        ids.Sort((a, b) => a.Index.CompareTo(b.Index));
-        writer.Write(ids.Count);
-        foreach (var id in ids)
+        writer.Write(_order.Count);
+        foreach (var id in _order.Ids)
         {
             var s = _states[id];
             writer.Write(id.Index);
