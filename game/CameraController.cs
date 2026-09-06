@@ -24,6 +24,8 @@ public partial class CameraController : Node
     private const double FollowMinPpt = 32, FollowMaxPpt = 64;
     private const double FreeMinPpt = 6, FreeMaxPpt = 64;
     private const double SnapDuration = 0.25;
+    // Free 模式 WASD 平移速度,tile/秒(固定 tile 速度,拉远时每秒扫过更多屏幕,可接受)。
+    private const double FreePanTilesPerSecond = 18.0;
 
     private double _ppt = 48;
     private bool _panning;
@@ -116,6 +118,17 @@ public partial class CameraController : Node
             else
             {
                 _centerTile = target;
+            }
+        }
+
+        if (Mode == CameraMode.Free && !_snapping)
+        {
+            float px = (Input.IsActionPressed("player_right") ? 1f : 0f) - (Input.IsActionPressed("player_left") ? 1f : 0f);
+            float py = (Input.IsActionPressed("player_down")  ? 1f : 0f) - (Input.IsActionPressed("player_up")   ? 1f : 0f);
+            if (px != 0f || py != 0f)
+            {
+                var d = new Vector2(px, py).Normalized() * (float)(FreePanTilesPerSecond * delta);
+                _centerTile += d;
             }
         }
 
