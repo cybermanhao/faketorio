@@ -16,24 +16,24 @@ public static class ScenarioSentinel
     // --- DefaultScale 下钉死的实测常量 ---------------------------------------
     // 这些数只在 ScenarioBuilder.WorldSeed / 几何常量 / data/base 都不变时成立。
     // 改任何一个都要重新实测填这里——这正是守卫的意义:悄悄漂了就炸。
-    public const int DefaultScaleEntities = 12009;
+    public const int DefaultScaleEntities = 3051;
 
-    // 实测 fed drill 数(4 * DefaultScale = 800 台采矿机里脚下有铁矿的台数)。
-    public const int MeasuredFedDrillCount = 137;
+    // 实测 fed drill 数(4 * DefaultScale = 200 台采矿机里脚下有铁矿的台数)。
+    public const int MeasuredFedDrillCount = 26;
 
     // 下界 = 实测值的 90%。噪声层是 seed 的纯函数,理论上一格不差;留 10%
     // 是给 data/base 里矿脉阈值的微调留余量,不是给"场景变了"留余量。
     public const int DefaultScaleFedDrillFloor = MeasuredFedDrillCount * 9 / 10;
 
     // DefaultScale 下各类型实体数(实测钉死)。
-    public const int DefaultScaleDrills = 800;
-    public const int DefaultScaleFurnaces = 400;
-    public const int DefaultScaleBelts = 3200;
-    public const int DefaultScaleInserters = 1200;
-    public const int DefaultScaleWoodenChests = 800;
-    public const int DefaultScaleLargeChests = 400;
-    public const int DefaultScaleGenerators = 1269;
-    public const int DefaultScalePoles = 3940;
+    public const int DefaultScaleDrills = 200;
+    public const int DefaultScaleFurnaces = 100;
+    public const int DefaultScaleBelts = 800;
+    public const int DefaultScaleInserters = 300;
+    public const int DefaultScaleWoodenChests = 200;
+    public const int DefaultScaleLargeChests = 100;
+    public const int DefaultScaleGenerators = 319;
+    public const int DefaultScalePoles = 1032;
 
     // 一台采矿机在 DefaultTicks 内、满 satisfaction 下最多能挖走的矿数:
     // MiningDrillPrototype.MiningSpeed = 1.0,所以每 ResourcePrototype.MiningTimeTicks

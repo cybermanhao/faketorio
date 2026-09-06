@@ -43,8 +43,8 @@ public static class ScenarioBuilder
     // "多摇几次骰子"的独立性红利拿不到。17% 已经是这套几何能摸到的天花板。
     public const long WorldSeed = 20260905L;
 
-    public const int DefaultScale = 200;
-    public const int DefaultTicks = 20000;
+    public const int DefaultScale = 50;
+    public const int DefaultTicks = 5000;
 
     // --- 几何常量(全部在这里,几何代码里不出现裸数字) -----------------------
     // 原点不是 (0,0):它是探针选出来的"矿最肥的一块地"。所有其它坐标都相对它算。

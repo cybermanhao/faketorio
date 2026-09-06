@@ -22,7 +22,7 @@ public sealed record BenchOptions(
         int scale = ScenarioBuilder.DefaultScale;
         int ticks = ScenarioBuilder.DefaultTicks;
         int warmup = 1;
-        int iterations = 5;
+        int iterations = 3;
         string goldenPath = "bench/golden.json";
         string reportPath = "bench/bench-report.json";
         bool updateGolden = false;

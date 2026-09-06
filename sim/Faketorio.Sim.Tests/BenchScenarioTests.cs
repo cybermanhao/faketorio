@@ -12,7 +12,7 @@ public class BenchScenarioTests
         Assert.Equal(ScenarioBuilder.DefaultScale, d.Scale);
         Assert.Equal(ScenarioBuilder.DefaultTicks, d.Ticks);
         Assert.Equal(1, d.Warmup);
-        Assert.Equal(5, d.Iterations);
+        Assert.Equal(3, d.Iterations);
         Assert.Equal("bench/golden.json", d.GoldenPath);
         Assert.Equal("bench/bench-report.json", d.ReportPath);
         Assert.False(d.UpdateGolden);
