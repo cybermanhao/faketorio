@@ -763,12 +763,10 @@ public sealed class Simulation
     // 那种 pre-settle 工作,只登记恒定待机能耗。
     private void InsertersTickPreSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Inserters.ActiveIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
             ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
         }
     }
@@ -777,12 +775,10 @@ public sealed class Simulation
     // 机械臂看到的是本 tick 开头的传送带状态)。两趟扫描的第二趟。
     private void InsertersTickPostSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Inserters.ActiveIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
             InserterTickPostSettle(id, proto, data.X, data.Y, data.Rotation);
         }
     }
@@ -794,7 +790,6 @@ public sealed class Simulation
         int dropX = x + dx, dropY = y + dy;   // 身前
         int held = Inserters.GetHeldItemProtoId(id);
         long progress = Inserters.GetSwingProgress(id);
-        long delta = proto.RotationSpeed.Mul(ElectricGrid.GetSatisfaction(id).Raw);
 
         // 阶段 A:空手停在抓取角 —— 尝试抓
         if (held == 0 && progress == 0)
@@ -831,6 +826,8 @@ public sealed class Simulation
             }
             return;   // 抓到就进阶段 B(下 tick);抓不到就下 tick 再试
         }
+
+        long delta = proto.RotationSpeed.Mul(ElectricGrid.GetSatisfaction(id).Raw);
 
         // 阶段 B:往外摆,拿着物品 —— 推进到 HalfSwing 后尝试放
         if (held != 0)

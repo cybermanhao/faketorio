@@ -45,4 +45,18 @@ public class ActiveIdListTests
         d.UnregisterDrill(new EntityId(42, 1));   // 没注册
         Assert.Equal(new[] { 7 }, Idx(d.ActiveIds));
     }
+
+    [Fact]
+    public void Inserters_ActiveIds_TracksRegisterUnregister_InIndexOrder()
+    {
+        var ins = new Inserters();
+        ins.RegisterInserter(new EntityId(6, 1));
+        ins.RegisterInserter(new EntityId(1, 1));
+        ins.RegisterInserter(new EntityId(4, 1));
+        Assert.Equal(new[] { 1, 4, 6 }, Idx(ins.ActiveIds));
+        ins.UnregisterInserter(new EntityId(4, 1));
+        Assert.Equal(new[] { 1, 6 }, Idx(ins.ActiveIds));
+        ins.UnregisterInserter(new EntityId(4, 1));   // 再删一次,no-op
+        Assert.Equal(new[] { 1, 6 }, Idx(ins.ActiveIds));
+    }
 }
