@@ -52,6 +52,9 @@ dotnet test sim/Faketorio.Sim.Tests --filter "FullyQualifiedName~SimulationTests
 
 # Release build (should be 0 warnings, 0 errors)
 dotnet build -c Release
+
+# Benchmark + regression baseline (state-hash golden + UPS/per-phase timings)
+dotnet run -c Release --project sim/Faketorio.Sim.Bench      # see bench/README.md
 ```
 
 Open the repo root in the Godot editor (requires Godot 4.5.1 Mono).

@@ -52,6 +52,9 @@ dotnet test sim/Faketorio.Sim.Tests --filter "FullyQualifiedName~SimulationTests
 
 # Release 构建(应为 0 警告 0 错误)
 dotnet build -c Release
+
+# 基准 + 回归基线(状态哈希 golden + UPS/分阶段耗时)
+dotnet run -c Release --project sim/Faketorio.Sim.Bench      # 详见 bench/README.md
 ```
 
 Godot 编辑器打开根目录即可(需要 Godot 4.5.1 Mono 版)。

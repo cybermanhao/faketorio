@@ -7,5 +7,9 @@ bin/
 obj/
 *.user
 
+# Bench per-run artifacts (golden.json IS committed; these are not)
+bench/bench-report.json
+bench-stdout.txt
+
 # Misc
 .weixin-sync-buf.json

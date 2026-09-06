@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet test sim/Faketorio.Sim.Tests -c Release
+
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run benchmark
+        run: |
+          set -o pipefail
+          dotnet run -c Release --project sim/Faketorio.Sim.Bench -- --json --golden bench/golden.json --report bench/bench-report.json | tee bench-stdout.txt
+      - name: Append report to job summary
+        if: always()
+        run: |
+          echo '## Benchmark' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f bench/bench-report.json ]; then
+            python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r = json.load(open('bench/bench-report.json'))
+          print(f"- scale={r['scale']} ticks={r['ticks']} gate=**{r['gate']}**")
+          print(f"- minNsPerTick={r['minNsPerTick']} baseline={r['baselineNsPerTick']} ratio={r['ratio']:.3f}")
+          print()
+          print("| phase | ns | % |")
+          print("|---|---:|---:|")
+          for p in r['phases']:
+              print(f"| {p['phase']} | {p['ns']} | {p['pctOfTick']:.1f} |")
+          PY
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-report
+          path: |
+            bench/bench-report.json
+            bench-stdout.txt
