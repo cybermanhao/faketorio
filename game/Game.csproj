@@ -1,0 +1,13 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <RootNamespace>Faketorio.Game</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\sim\Faketorio.Sim\Faketorio.Sim.csproj" />
+    <ProjectReference Include="..\presentation\Faketorio.Presentation.Core\Faketorio.Presentation.Core.csproj" />
+  </ItemGroup>
+</Project>
