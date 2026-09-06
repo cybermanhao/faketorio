@@ -8,7 +8,7 @@ using Faketorio.Sim.World;
 namespace Faketorio.Game;
 
 /// 立即模式**只读**渲染。每帧 QueueRedraw + _Draw,从 sim 现读现画,零 mutation。
-/// 矿脉走 ResourceGrid.PeekResourceAt(不生成 chunk、不进状态哈希);
+/// 矿脉走 ResourceGrid.PeekChunk(不生成 chunk、不进状态哈希);
 /// 实体走 EntityPool 的索引序遍历 + WorldGrid(本身无副作用)。
 public partial class WorldView : Node2D
 {
@@ -17,8 +17,8 @@ public partial class WorldView : Node2D
     /// 低于这个缩放不画矿(一屏几十万格,且 Peek 未生成 chunk 时要临时 Generate,太贵)。
     private const double MinPptForOre = 8;
 
-    /// 每帧最多填充几个 32x32 的矿缓存块——PeekResourceAt 对未生成的 chunk 会
-    /// 临时 Generate 一整块再丢弃,一次填满整屏会卡顿,所以摊到多帧。
+    /// 每帧最多填充几个 32x32 的矿缓存块——PeekChunk 对未生成的 chunk 会
+    /// 临时 Generate 一整块再丢弃(每块仅一次),一次填满整屏仍有成本,所以摊到多帧。
     /// 关键:填充只在 _Process 里跑,_Draw 绝不同步生成 chunk。
     private const int MaxOreChunkFillsPerFrame = 4;
 
@@ -30,6 +30,8 @@ public partial class WorldView : Node2D
     private BuildController _build = null!;
 
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
+    // PeekChunk 的复用缓冲:每次填一个显示 chunk 先灌进这里,再拷进 _oreCache 的独立数组。
+    private readonly ResourceCell[] _chunkFillBuf = new ResourceCell[32 * 32];
     // _Draw 命中未缓存 chunk 时把 key 丢这里,_Process 每帧摊几个填进 _oreCache。
     private readonly HashSet<long> _pendingOreChunks = new();
     private readonly List<long> _oreFillScratch = new();
@@ -47,7 +49,8 @@ public partial class WorldView : Node2D
         QueueRedraw();
     }
 
-    // 每帧摊几个待填 chunk 进缓存。这是唯一会调用 PeekResourceAt(可能触发 Generate)的地方。
+    // 每帧摊几个待填 chunk 进缓存。这是唯一会调用 PeekChunk(可能触发一次 Generate)的地方。
+    // 每个待填 chunk 只做一次 PeekChunk(整块 1024 格一次读完),不再逐格 PeekResourceAt。
     private void FillPendingOreChunks()
     {
         if (_pendingOreChunks.Count == 0) return;
@@ -69,10 +72,9 @@ public partial class WorldView : Node2D
             int cy = (int)(ck & 0xFFFFFFFFL);
             int bx = cx << 5, by = cy << 5;
 
+            res.PeekChunk(bx, by, _chunkFillBuf);
             var arr = new ResourceCell[32 * 32];
-            for (int ly = 0; ly < 32; ly++)
-                for (int lx = 0; lx < 32; lx++)
-                    arr[ly * 32 + lx] = res.PeekResourceAt(bx + lx, by + ly);
+            System.Array.Copy(_chunkFillBuf, arr, 32 * 32);
             _oreCache[ck] = arr;
         }
     }
@@ -111,7 +113,7 @@ public partial class WorldView : Node2D
             }
         }
 
-        // 3. 矿脉(经 PeekResourceAt,无副作用)
+        // 3. 矿脉(经 PeekChunk 缓存,无副作用)
         if (t.PixelsPerTile >= MinPptForOre)
         {
             for (int y = vis.MinY; y < vis.MaxY; y++)

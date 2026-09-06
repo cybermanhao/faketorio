@@ -198,4 +198,36 @@ public class ResourceGridTests
         // (1,0) is inside both patches; coal is listed first
         Assert.Equal(reg.Get<ResourcePrototype>("coal").Id, g.GetResourceAt(1, 0).ResourceProtoId);
     }
+
+    [Fact]
+    public void PeekChunk_MatchesPerTilePeek_AndHasNoSideEffect()
+    {
+        var protos = PrototypeLoader.LoadFromDirectory("data/base");
+        var grid = new ResourceGrid(555444333L, protos);
+        int chunksBefore = grid.GeneratedChunkCount;
+
+        var buf = new ResourceCell[32 * 32];
+        // a far, un-generated chunk
+        int ox = 700, oy = -300;   // some tile inside that chunk
+        grid.PeekChunk(ox, oy, buf);
+
+        Assert.Equal(chunksBefore, grid.GeneratedChunkCount);   // no side effect
+
+        int bx = (ox >> 5) << 5, by = (oy >> 5) << 5;
+        for (int ly = 0; ly < 32; ly++)
+            for (int lx = 0; lx < 32; lx++)
+                Assert.Equal(grid.PeekResourceAt(bx + lx, by + ly), buf[ly * 32 + lx]);
+    }
+
+    [Fact]
+    public void PeekChunk_DoesNotChangeStateHash()
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), 555444333L);
+        sim.Step();
+        ulong before = sim.ComputeStateHash();
+        var buf = new ResourceCell[32 * 32];
+        for (int c = 0; c < 20; c++)
+            sim.Resources.PeekChunk(c * 40 + 2000, c * 37 - 1500, buf);
+        Assert.Equal(before, sim.ComputeStateHash());
+    }
 }

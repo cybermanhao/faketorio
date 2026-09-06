@@ -66,6 +66,22 @@ public sealed class ResourceGrid
         return chunk.TypeId[i] == 0 ? ResourceCell.Empty : new ResourceCell(chunk.TypeId[i], chunk.Amount[i]);
     }
 
+    // 无副作用批量读:填满 (anyTileX, anyTileY) 所在 chunk 的 32x32 = 1024 个 ResourceCell 到
+    // into(长度必须 >= 1024,按 ly*32+lx 排布,lx/ly ∈ 0..31)。已生成的 chunk 直接拷贝;
+    // 未生成的临时 Generate 一次读完丢弃,不进 _chunks、不置 _keysDirty。
+    // 供表现层"一次填一个显示 chunk"而不是逐格 PeekResourceAt(那是 O(chunk 格数^2))。
+    public void PeekChunk(int anyTileX, int anyTileY, ResourceCell[] into)
+    {
+        long key = ChunkKey(anyTileX, anyTileY);
+        if (!_chunks.TryGetValue(key, out var chunk))
+        {
+            chunk = new ResourceChunk();
+            Generate(anyTileX, anyTileY, chunk);   // fills the whole 32x32 once
+        }
+        for (int i = 0; i < Size * Size; i++)
+            into[i] = chunk.TypeId[i] == 0 ? ResourceCell.Empty : new ResourceCell(chunk.TypeId[i], chunk.Amount[i]);
+    }
+
     public int Extract(int x, int y, int count)
     {
         if (count <= 0) return 0;
