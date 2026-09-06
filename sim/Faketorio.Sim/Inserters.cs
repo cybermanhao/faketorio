@@ -20,6 +20,8 @@ public sealed class Inserters
     private readonly OrderedEntityIdList _order = new();
 
     public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
+    internal List<EntityId> ActiveIdsList => _order.IdsList;
+    internal int StateCount => _states.Count;
 
     public void RegisterInserter(EntityId id)
     {

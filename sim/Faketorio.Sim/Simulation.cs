@@ -510,7 +510,7 @@ public sealed class Simulation
     // Inventories/Prototypes 依赖)。登记「有燃料就能出满功率,没燃料出 0」。
     private void ElectricGeneratorsRegisterSupply()
     {
-        foreach (var id in ElectricGrid.GeneratorIds)
+        foreach (var id in ElectricGrid.GeneratorIdList)
         {
             ref var data = ref Entities.Get(id);
             var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
@@ -523,7 +523,7 @@ public sealed class Simulation
 
     private void ElectricGeneratorsBurnFuel()
     {
-        foreach (var id in ElectricGrid.GeneratorIds)
+        foreach (var id in ElectricGrid.GeneratorIdList)
         {
             ref var data = ref Entities.Get(id);
             var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
@@ -545,7 +545,7 @@ public sealed class Simulation
     // 先登记完需求,ElectricGrid.Settle() 才能看到本 tick 完整的需求总量。
     private void MachinesTickPreSettle()
     {
-        foreach (var id in Machines.ActiveIds)
+        foreach (var id in Machines.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
@@ -606,7 +606,7 @@ public sealed class Simulation
     // 加工:进度推进 + 完成校验(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MachinesTickPostSettle()
     {
-        foreach (var id in Machines.ActiveIds)
+        foreach (var id in Machines.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
@@ -653,7 +653,7 @@ public sealed class Simulation
     // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
     private void MiningDrillsTickPreSettle()
     {
-        foreach (var id in MiningDrills.ActiveIds)
+        foreach (var id in MiningDrills.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
@@ -727,7 +727,7 @@ public sealed class Simulation
     // 采矿:进度推进 + 产出(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MiningDrillsTickPostSettle()
     {
-        foreach (var id in MiningDrills.ActiveIds)
+        foreach (var id in MiningDrills.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
@@ -759,7 +759,7 @@ public sealed class Simulation
     // 那种 pre-settle 工作,只登记恒定待机能耗。
     private void InsertersTickPreSettle()
     {
-        foreach (var id in Inserters.ActiveIds)
+        foreach (var id in Inserters.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
@@ -771,7 +771,7 @@ public sealed class Simulation
     // 机械臂看到的是本 tick 开头的传送带状态)。两趟扫描的第二趟。
     private void InsertersTickPostSettle()
     {
-        foreach (var id in Inserters.ActiveIds)
+        foreach (var id in Inserters.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
             var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);

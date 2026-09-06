@@ -73,4 +73,62 @@ public class ActiveIdListTests
         g.UnregisterGenerator(new EntityId(100, 1));   // 没注册
         Assert.Equal(new[] { 3, 9 }, Idx(g.GeneratorIds));
     }
+
+    // Spec §6.1 set-equivalence invariant: 任意(真实 sim 可达的)操作序列后
+    // HashSet(ActiveIds) == _states.Keys,且 Count 一致。
+    // 每个容器跑同一条混合序列:乱序 register / 重复 register(no-op)/
+    // 拆一个真的 / 拆一个从没注册的(no-op)/ 槽位复用(先拆再以新代数重注册)。
+    [Fact]
+    public void Containers_ActiveIds_StayInLockstepWithState()
+    {
+        // 期望最终仍注册的 id(Index 升序):1@1, 2@2(复用后), 5@1
+        var expected = new HashSet<EntityId>
+        {
+            new(1, 1), new(2, 2), new(5, 1),
+        };
+
+        var m = new Machines();
+        foreach (var id in new[] { new EntityId(5, 1), new EntityId(2, 1), new EntityId(8, 1), new EntityId(1, 1) })
+            m.RegisterMachine(id);
+        m.RegisterMachine(new EntityId(2, 1));          // 重复 -> no-op
+        m.UnregisterMachine(new EntityId(8, 1));        // 拆真的
+        m.UnregisterMachine(new EntityId(99, 1));       // 从没注册 -> no-op
+        m.UnregisterMachine(new EntityId(2, 1));        // 槽位复用:先拆
+        m.RegisterMachine(new EntityId(2, 2));          //           再以新代数重注册
+        Assert.Equal(m.StateCount, m.ActiveIds.Count);
+        Assert.True(new HashSet<EntityId>(m.ActiveIds).SetEquals(expected));
+
+        var d = new MiningDrills();
+        foreach (var id in new[] { new EntityId(5, 1), new EntityId(2, 1), new EntityId(8, 1), new EntityId(1, 1) })
+            d.RegisterDrill(id);
+        d.RegisterDrill(new EntityId(2, 1));
+        d.UnregisterDrill(new EntityId(8, 1));
+        d.UnregisterDrill(new EntityId(99, 1));
+        d.UnregisterDrill(new EntityId(2, 1));
+        d.RegisterDrill(new EntityId(2, 2));
+        Assert.Equal(d.StateCount, d.ActiveIds.Count);
+        Assert.True(new HashSet<EntityId>(d.ActiveIds).SetEquals(expected));
+
+        var ins = new Inserters();
+        foreach (var id in new[] { new EntityId(5, 1), new EntityId(2, 1), new EntityId(8, 1), new EntityId(1, 1) })
+            ins.RegisterInserter(id);
+        ins.RegisterInserter(new EntityId(2, 1));
+        ins.UnregisterInserter(new EntityId(8, 1));
+        ins.UnregisterInserter(new EntityId(99, 1));
+        ins.UnregisterInserter(new EntityId(2, 1));
+        ins.RegisterInserter(new EntityId(2, 2));
+        Assert.Equal(ins.StateCount, ins.ActiveIds.Count);
+        Assert.True(new HashSet<EntityId>(ins.ActiveIds).SetEquals(expected));
+
+        var g = new Faketorio.Sim.Electric.ElectricGrid();
+        foreach (var id in new[] { new EntityId(5, 1), new EntityId(2, 1), new EntityId(8, 1), new EntityId(1, 1) })
+            g.RegisterGenerator(id);
+        g.RegisterGenerator(new EntityId(2, 1));
+        g.UnregisterGenerator(new EntityId(8, 1));
+        g.UnregisterGenerator(new EntityId(99, 1));
+        g.UnregisterGenerator(new EntityId(2, 1));
+        g.RegisterGenerator(new EntityId(2, 2));
+        Assert.Equal(g.GeneratorStateCount, g.GeneratorIds.Count);
+        Assert.True(new HashSet<EntityId>(g.GeneratorIds).SetEquals(expected));
+    }
 }

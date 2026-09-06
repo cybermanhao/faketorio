@@ -13,6 +13,8 @@ public sealed class MiningDrills
     private readonly OrderedEntityIdList _order = new();
 
     public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
+    internal List<EntityId> ActiveIdsList => _order.IdsList;
+    internal int StateCount => _states.Count;
 
     public void RegisterDrill(EntityId id)
     {
@@ -57,7 +59,10 @@ public sealed class MiningDrills
     // 由调用方决定——矿格挖空传 (-1,-1)(下 tick 重新搜),没挖空传原目标
     // (继续挖同一格)。
     public void ResetAfterFlush(EntityId id, int targetX, int targetY)
-        => _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0);
+    {
+        _ = _states[id];   // 前置:已注册(throw-on-missing,同 SetTarget/AddProgress/MarkCompleted)
+        _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0);
+    }
 
     // 按 EntityId.Index 排序后写:index/代数/目标坐标/进度/是否已完成/待放置物品 id。
     public void WriteState(IStateWriter writer)

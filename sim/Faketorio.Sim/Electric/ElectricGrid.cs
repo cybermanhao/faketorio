@@ -18,8 +18,10 @@ public sealed class ElectricGrid
     private readonly Dictionary<EntityId, Q16> _satisfaction = new();
 
     private readonly Dictionary<EntityId, long> _fuelBufferJ = new();
-    private readonly Faketorio.Sim.OrderedEntityIdList _generatorOrder = new();
+    private readonly OrderedEntityIdList _generatorOrder = new();
     public IReadOnlyList<EntityId> GeneratorIds => _generatorOrder.Ids;
+    internal List<EntityId> GeneratorIdList => _generatorOrder.IdsList;
+    internal int GeneratorStateCount => _fuelBufferJ.Count;
 
     public void RegisterGenerator(EntityId id)
     {
