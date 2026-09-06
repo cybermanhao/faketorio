@@ -33,6 +33,9 @@ public partial class WorldView : Node2D
     private CameraController _cam = null!;
     private BuildController _build = null!;
 
+    // 玩家原型的 ReachSubTiles 是不可变值,_Ready 里读一次缓存,别每帧字符串查字典。
+    private int _reachSubTiles;
+
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
     // _oreCache 的插入顺序,用于有界淘汰(每个 ck 一生只入队一次,见 FillPendingOreChunks 的 ContainsKey 门)。
     private readonly Queue<long> _oreCacheOrder = new();
@@ -47,6 +50,7 @@ public partial class WorldView : Node2D
         _host = GetNode<SimHost>("/root/SimHost");
         _cam = GetNode<CameraController>("../CameraController");
         _build = GetNode<BuildController>("../BuildController");
+        _reachSubTiles = _host.Sim.Prototypes.Get<PlayerPrototype>("player").ReachSubTiles;
     }
 
     public override void _Process(double delta)
@@ -201,12 +205,17 @@ public partial class WorldView : Node2D
             {
                 col = new Color(1, 0.3f, 0.3f);
             }
-            else if (Input.IsActionPressed("player_mine"))
+            else if (sim.Player.Mining)
             {
-                int reach = sim.Prototypes.Get<PlayerPrototype>("player").ReachSubTiles;
-                long ddx = sim.Player.X - ((long)hx * 256 + 128);
-                long ddy = sim.Player.Y - ((long)hy * 256 + 128);
-                bool inReach = ddx * ddx + ddy * ddy <= (long)reach * reach;
+                // Free(地图)模式下 PlayerInputController 会压制手挖(进入 Free 时发 MineStop),
+                // 此时 Player.Mining 为 false,不再画 reach 着色这一假可供性。
+                const int St = WorldTransform.SubTilesPerTile;   // 256;半格 St/2 = 128
+                int reach = _reachSubTiles;
+                long ddx = sim.Player.X - ((long)hx * St + St / 2);
+                long ddy = sim.Player.Y - ((long)hy * St + St / 2);
+                // 与 Simulation.PlayerMine 的 Isqrt(ddx²+ddy²) > ReachSubTiles 拒绝边界完全对齐,
+                // 即接受当且仅当 ddx²+ddy² < (reach+1)²。
+                bool inReach = ddx * ddx + ddy * ddy < (long)(reach + 1) * (reach + 1);
                 col = inReach ? new Color(0.4f, 1f, 0.5f, 0.9f) : new Color(0.6f, 0.6f, 0.6f, 0.7f);
             }
             else

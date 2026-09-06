@@ -121,6 +121,7 @@ public partial class CameraController : Node
             }
         }
 
+        // !_snapping is always true here (snap only runs in Follow) — kept for intent
         if (Mode == CameraMode.Free && !_snapping)
         {
             float px = (Input.IsActionPressed("player_right") ? 1f : 0f) - (Input.IsActionPressed("player_left") ? 1f : 0f);
