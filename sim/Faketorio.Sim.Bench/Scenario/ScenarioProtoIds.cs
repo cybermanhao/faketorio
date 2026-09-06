@@ -16,6 +16,12 @@ public sealed class ScenarioProtoIds
     public int WoodenChest { get; }
     public int LargeChest { get; }
     public int IronOre { get; }
+
+    // 注意:矿脉层(ResourceGrid / ResourceCell.ResourceProtoId)用的是
+    // ResourcePrototype 的 Id,和同名 ItemPrototype 的 Id 是 PrototypeRegistry
+    // 里两个不同的对象、两个不同的号。拿 IronOre 去比 ResourceCell 恒不相等
+    // (Task 3 的 "FedDrillCount 恒 0" 就是这么来的),脚下有没有矿必须比这个。
+    public int IronOreResource { get; }
     public int IronPlate { get; }
     public int Coal { get; }
 
@@ -54,6 +60,7 @@ public sealed class ScenarioProtoIds
         WoodenChest = woodenChest.Id;
         LargeChest = largeChest.Id;
         IronOre = ironOre.Id;
+        IronOreResource = protos.Get<ResourcePrototype>("iron-ore").Id;
         IronPlate = ironPlate.Id;
         Coal = coal.Id;
 

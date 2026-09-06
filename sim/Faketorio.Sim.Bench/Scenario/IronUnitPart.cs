@@ -155,7 +155,7 @@ public sealed class IronUnitPart : IScenarioPart
             for (int cell = 0; cell < 4; cell++)
             {
                 var res = sim.Resources.GetResourceAt(x + cell % 2, y + cell / 2);
-                if (!res.IsEmpty && res.ResourceProtoId == _ids.IronOre) here += res.Amount;
+                if (!res.IsEmpty && res.ResourceProtoId == _ids.IronOreResource) here += res.Amount;
             }
             if (here > 0) fedDrills++;
             minableOre += here;
