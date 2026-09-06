@@ -100,7 +100,8 @@ public static class BenchRunner
                 : GoldenFile.Load(opt.GoldenPath);
 
         int[] sampleTicks = NormaliseSampleTicks(
-            golden?.SampleTicks ?? new[] { 1000, 5000, 10000, opt.Ticks }, opt.Ticks);
+            golden?.SampleTicks ?? new[] { opt.Ticks / 4, opt.Ticks / 2, opt.Ticks * 3 / 4, opt.Ticks },
+            opt.Ticks);
 
         // 5. warmup — discarded.
         for (int w = 0; w < opt.Warmup; w++)
