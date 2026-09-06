@@ -33,7 +33,6 @@ public partial class WorldView : Node2D
         _host = GetNode<SimHost>("/root/SimHost");
         _cam = GetNode<CameraController>("../CameraController");
         _build = GetNode<BuildController>("../BuildController");
-        TopLevel = true;   // 脱离 Camera2D 变换,完全用 WorldTransform 画屏幕像素
     }
 
     public override void _Process(double delta) => QueueRedraw();
@@ -43,6 +42,9 @@ public partial class WorldView : Node2D
         _oreFillsThisFrame = 0;
 
         var t = _cam.WorldXform;
+        // 第一帧 CameraController._Process 可能还没跑过,视口尺寸是 (0,0) —— 这帧啥也别画。
+        if (t.ViewportSizePx.X < 1 || t.ViewportSizePx.Y < 1) return;
+
         var vis = t.VisibleTileRect(marginTiles: 3);
         var sim = _host.Sim;
         float ppt = (float)t.PixelsPerTile;
@@ -102,6 +104,10 @@ public partial class WorldView : Node2D
             var size = new Vector2(ppt * w - 2, ppt * h - 2);
             DrawRect(new Rect2(s + new Vector2(1, 1), size), RenderPalette.ForEntity(proto));
             DrawOrientation(s + new Vector2(1, 1), size, d.Rotation);
+
+            // 传送带:在基色矩形上叠 3 个雪佛龙箭头,沿 Rotation 指的方向 —— 一眼认出是"传送带"。
+            if (proto is TransportBeltPrototype)
+                DrawBeltChevrons(s + new Vector2(1, 1) + size / 2, ppt, d.Rotation);
         }
 
         // 5. 传送带上的物品
@@ -113,10 +119,12 @@ public partial class WorldView : Node2D
             DrawLaneItems(t, line, line.LaneB, laneOffsetTiles: +0.22);
         }
 
-        // 6. 玩家
+        // 6. 玩家 —— 小圆点标记,半径钳在 20px 以内,再缩再放都不会变成"大饼"。
         {
             var p = t.WorldSubToScreen(sim.Player.X, sim.Player.Y).ToGodot();
-            DrawCircle(p, ppt * 0.35f, new Color("#e8e8e8"));
+            float pr = Mathf.Min(ppt * 0.3f, 20f);
+            DrawCircle(p, pr, new Color("#e8e8e8"));
+            DrawArc(p, pr, 0f, Mathf.Tau, 24, new Color(0.1f, 0.1f, 0.1f, 0.9f), 1.5f, true);
         }
 
         // 7. 光标格高亮
@@ -125,6 +133,31 @@ public partial class WorldView : Node2D
             var s = t.TileToScreen(hx, hy).ToGodot();
             var r = new Rect2(s, new Vector2(ppt, ppt));
             DrawRect(r, _build.LastCommandRejected ? new Color(1, 0.3f, 0.3f) : new Color(1, 1, 1, 0.8f), false, 2f);
+        }
+
+        // 8. 相机模式 HUD —— 左上角文字,M 键切换时肉眼可见。
+        {
+            string label = _cam.Mode == CameraMode.Follow ? "FOLLOW" : "MAP (free)";
+            DrawString(ThemeDB.FallbackFont, new Vector2(8, 20), label,
+                       HorizontalAlignment.Left, -1f, 16, new Color(1, 1, 1, 0.9f));
+        }
+    }
+
+    // 沿 rot(0/1/2/3 = N/E/S/W)方向画 3 个 ">" 雪佛龙。center 是 belt 格中心(屏幕像素)。
+    private void DrawBeltChevrons(Vector2 center, float ppt, byte rot)
+    {
+        var (dxi, dyi) = BeltNetwork.Delta(rot);
+        var dir = new Vector2(dxi, dyi);
+        var perp = new Vector2(-dyi, dxi);
+        var col = new Color(1, 1, 1, 0.6f);
+        float wing = ppt * 0.26f;
+        float depth = ppt * 0.16f;
+        for (int k = -1; k <= 1; k++)
+        {
+            var mid = center + dir * (k * ppt * 0.3f);
+            var tip = mid + dir * depth;
+            DrawLine(mid + perp * wing, tip, col, 2f);
+            DrawLine(mid - perp * wing, tip, col, 2f);
         }
     }
 
@@ -175,7 +208,9 @@ public partial class WorldView : Node2D
             double px = exitX - dx * back + nx * laneOffsetTiles * Sub;
             double py = exitY - dy * back + ny * laneOffsetTiles * Sub;
             var s = t.WorldSubToScreen((long)px, (long)py).ToGodot();
-            DrawRect(new Rect2(s - half, new Vector2(sz, sz)), RenderPalette.ForItem(it.ItemProtoId));
+            var box = new Rect2(s - half, new Vector2(sz, sz));
+            DrawRect(box, RenderPalette.ForItem(it.ItemProtoId));                 // 亮色方块
+            DrawRect(box, new Color(0.1f, 0.1f, 0.1f, 0.9f), false, 1f);          // 深色描边,motion 更明显
         }
     }
 

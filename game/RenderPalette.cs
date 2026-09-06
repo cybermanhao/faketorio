@@ -12,7 +12,7 @@ public static class RenderPalette
         FurnacePrototype => new Color("#c0523a"),
         AssemblingMachinePrototype => new Color("#5b8ad9"),
         CraftingMachinePrototype => new Color("#5b8ad9"),   // 未来新的加工机类型的兜底
-        TransportBeltPrototype => new Color("#7a7a4a"),
+        TransportBeltPrototype => new Color("#4a5568"),   // 去饱和蓝灰,读作"传送带"
         InserterPrototype => new Color("#d9c85b"),
         ElectricPolePrototype => new Color("#8a6d3b"),
         FuelGeneratorPrototype => new Color("#6b4a2a"),
@@ -31,5 +31,5 @@ public static class RenderPalette
         }
         : new Color(0.5f, 0.5f, 0.5f, 0.4f);
 
-    public static Color ForItem(int itemProtoId) => new Color("#cfd3d6");
+    public static Color ForItem(int itemProtoId) => new Color("#f0f0f0");   // 近白,带下方深色描边,在带上滑动很显眼
 }

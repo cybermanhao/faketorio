@@ -5,18 +5,16 @@ namespace Faketorio.Game;
 
 public enum CameraMode { Follow, Free }
 
-/// 双模相机。Follow:锁玩家,近景窄缩放区间。Free(地图模式):中键拖动平移,
-/// 缩放区间放宽到能一眼看完整片基地。M 键切换,切回 Follow 时 tween 滑回玩家。
+/// 双模相机控制器。**它本身不是 Camera2D** —— 场景里根本没有 Camera2D。
+/// 唯一的坐标映射是 WorldXform(WorldTransform):每帧把中心 tile / 每格像素 /
+/// 视口尺寸喂进去,WorldView 完全靠它把 world 坐标算成屏幕像素。
 ///
-/// 注意:Camera2D 自身的变换在这里**不参与渲染** —— WorldView 是 TopLevel 的,
-/// 完全靠 WorldXform(WorldTransform)算像素。GlobalPosition 只被当成
-/// "相机中心的 world tile 坐标"这个纯数据来用,Zoom 恒为 1。
-public partial class CameraController : Camera2D
+/// Follow:锁玩家,近景窄缩放区间,切回时 0.25s 缓动滑回。
+/// Free(地图模式):中键拖动平移,缩放区间放宽。M 键切换。
+public partial class CameraController : Node
 {
     public CameraMode Mode { get; private set; } = CameraMode.Follow;
 
-    // 刻意不叫 Transform:Node2D 已经有一个 Transform(Transform2D)属性,
-    // 同名会遮蔽引擎属性(CS0108)并让 Godot 的属性表混乱。
     public WorldTransform WorldXform { get; } = new();
 
     private ICameraTarget? _followTarget;
@@ -25,23 +23,29 @@ public partial class CameraController : Camera2D
     // Follow 近景窄区间;Free 放宽
     private const double FollowMinPpt = 32, FollowMaxPpt = 64;
     private const double FreeMinPpt = 4, FreeMaxPpt = 64;
+    private const double SnapDuration = 0.25;
 
     private double _ppt = 48;
     private bool _panning;
-    private Tween? _snapTween;
+
+    // 相机中心的 world tile 坐标(可含小数)。以前借用 Camera2D.GlobalPosition,现在自己持有。
+    private Vector2 _centerTile;
+
+    // 切回 Follow 时的缓动状态
+    private bool _snapping;
+    private double _snapElapsed;
+    private Vector2 _snapFrom;
 
     public override void _Ready()
     {
         _host = GetNode<SimHost>("/root/SimHost");
         _followTarget = new PlayerCameraTarget(_host);
-        Zoom = Vector2.One;
-        GlobalPosition = TargetTile();
+        _centerTile = TargetTile();
     }
 
     public override void _UnhandledInput(InputEvent e)
     {
-        // InputMap 里有 map_toggle 就用它;没有(project.godot 的 action 序列化
-        // 在别的 Godot 版本上可能读不出来)就直接认 M 键。
+        // InputMap 里有 map_toggle 就用它;没有就直接认 M 键。
         bool toggle = (InputMap.HasAction("map_toggle") && e.IsActionPressed("map_toggle"))
                       || e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.M };
         if (toggle) { ToggleMode(); return; }
@@ -55,8 +59,8 @@ public partial class CameraController : Camera2D
 
         if (e is InputEventMouseMotion mm && _panning && Mode == CameraMode.Free)
         {
-            // 拖多少屏幕像素,世界就反向移动等量:px / (px per tile) = tile。
-            GlobalPosition -= mm.Relative / (float)_ppt;
+            // 拖多少屏幕像素,世界中心就反向移动等量:px / (px per tile) = tile。
+            _centerTile -= mm.Relative / (float)_ppt;
         }
     }
 
@@ -66,8 +70,7 @@ public partial class CameraController : Camera2D
         {
             Mode = CameraMode.Free;
             _panning = false;
-            _snapTween?.Kill();
-            _snapTween = null;
+            _snapping = false;
             _ppt = System.Math.Clamp(_ppt, FreeMinPpt, FreeMaxPpt);
         }
         else
@@ -75,11 +78,9 @@ public partial class CameraController : Camera2D
             Mode = CameraMode.Follow;
             _panning = false;
             _ppt = System.Math.Clamp(_ppt, FollowMinPpt, FollowMaxPpt);
-            _snapTween?.Kill();
-            _snapTween = CreateTween();
-            _snapTween.TweenProperty(this, "global_position", TargetTile(), 0.25)
-                      .SetTrans(Tween.TransitionType.Sine)
-                      .SetEase(Tween.EaseType.Out);
+            _snapping = true;
+            _snapElapsed = 0;
+            _snapFrom = _centerTile;
         }
     }
 
@@ -100,12 +101,27 @@ public partial class CameraController : Camera2D
 
     public override void _Process(double delta)
     {
-        if (Mode == CameraMode.Follow && (_snapTween is null || !_snapTween.IsRunning()))
-            GlobalPosition = TargetTile();
+        if (Mode == CameraMode.Follow)
+        {
+            var target = TargetTile();
+            if (_snapping)
+            {
+                _snapElapsed += delta;
+                float k = (float)System.Math.Clamp(_snapElapsed / SnapDuration, 0.0, 1.0);
+                // sine ease-out
+                float eased = Mathf.Sin(k * Mathf.Pi * 0.5f);
+                _centerTile = _snapFrom.Lerp(target, eased);
+                if (k >= 1f) _snapping = false;
+            }
+            else
+            {
+                _centerTile = target;
+            }
+        }
 
-        var vp = GetViewportRect().Size;
+        var vp = GetViewport().GetVisibleRect().Size;
         WorldXform.PixelsPerTile = _ppt;
-        WorldXform.CameraCenterTile = new Vec2(GlobalPosition.X, GlobalPosition.Y);
+        WorldXform.CameraCenterTile = new Vec2(_centerTile.X, _centerTile.Y);
         WorldXform.ViewportSizePx = new Vec2(vp.X, vp.Y);
     }
 }
