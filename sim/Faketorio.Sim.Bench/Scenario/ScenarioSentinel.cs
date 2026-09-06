@@ -45,10 +45,10 @@ public static class ScenarioSentinel
     //
     // 【与 task brief 的偏差,故意的】brief 写的是
     //     totals.MinableOre > totals.FedDrillCount * DefaultTicks
-    // 即"每台 fed drill 脚下要有 20000 个矿"。这在 data/base 下算术上不可能:
+    // 即"每台 fed drill 脚下要有 5000 个矿"。这在 data/base 下算术上不可能:
     // richnessBase 400 + richnessScale 6000 * excess,单格上限 ~2280,2x2 上限
     // ~9120。真正想表达的是"矿量不是瓶颈,基准跑的是机器不是空转",所以这里
-    // 用真实的采矿速率上界 DefaultTicks / MiningTimeTicks(当前数据 = 333)作下界。
+    // 用真实的采矿速率上界 DefaultTicks / MiningTimeTicks(当前数据 = 83)作下界。
     public static long MaxOrePerDrillOverDefaultTicks(Simulation sim)
     {
         int miningTimeTicks = sim.Prototypes.Get<ResourcePrototype>("iron-ore").MiningTimeTicks;
@@ -95,7 +95,7 @@ public static class ScenarioSentinel
                 $"sentinel #2(采矿机有矿):scale={scale} fed drill {totals.FedDrillCount} < 下界 {fedFloor}" +
                 $"(世界种子 {ScenarioBuilder.WorldSeed} 下的矿脉分布变了?)");
 
-        // 每台 fed drill 脚下至少一格矿,而 data/base 的 richnessBase = 400 > 333,
+        // 每台 fed drill 脚下至少一格矿,而 data/base 的 richnessBase = 400 > 83,
         // 所以只要 fed drill 存在,这条在任何 scale 下都该成立。
         long oreFloor = (long)totals.FedDrillCount * MaxOrePerDrillOverDefaultTicks(sim);
         if (totals.FedDrillCount > 0 && totals.MinableOre <= oreFloor)

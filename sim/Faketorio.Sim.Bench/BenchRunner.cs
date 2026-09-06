@@ -15,7 +15,8 @@ public sealed record BenchOptions(
     string ReportPath,
     bool UpdateGolden,
     bool Json,
-    bool SelfTest)
+    bool SelfTest,
+    bool RequireGates = false)
 {
     public static BenchOptions Parse(string[] args)
     {
@@ -28,6 +29,7 @@ public sealed record BenchOptions(
         bool updateGolden = false;
         bool json = false;
         bool selfTest = false;
+        bool requireGates = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -42,12 +44,19 @@ public sealed record BenchOptions(
                 case "--update-golden": updateGolden = true; break;
                 case "--json": json = true; break;
                 case "--selftest": selfTest = true; break;
+                case "--require-gates": requireGates = true; break;
                 default: throw new ArgumentException($"unknown argument: {args[i]}");
             }
         }
 
+        if (iterations < 1) throw new ArgumentException("--iterations must be >= 1");
+        if (scale < 1) throw new ArgumentException("--scale must be >= 1");
+        if (ticks < 1) throw new ArgumentException("--ticks must be >= 1");
+        if (warmup < 0) throw new ArgumentException("--warmup must be >= 0");
+
         return new BenchOptions(
-            scale, ticks, warmup, iterations, goldenPath, reportPath, updateGolden, json, selfTest);
+            scale, ticks, warmup, iterations, goldenPath, reportPath, updateGolden, json, selfTest,
+            requireGates);
     }
 
     private static string NextArg(string[] args, ref int i)
@@ -94,10 +103,24 @@ public static class BenchRunner
 
     private static int RunCore(BenchOptions opt, TextWriter stdout)
     {
-        GoldenFile? golden =
-            opt.UpdateGolden && !File.Exists(opt.GoldenPath)
-                ? null
-                : GoldenFile.Load(opt.GoldenPath);
+        // A plain verify run always loads the golden (missing / corrupt → GoldenFileException
+        // → exit 3). --update-golden is allowed to regenerate over a missing OR corrupt one.
+        GoldenFile? golden;
+        if (opt.UpdateGolden)
+        {
+            try
+            {
+                golden = File.Exists(opt.GoldenPath) ? GoldenFile.Load(opt.GoldenPath) : null;
+            }
+            catch (GoldenFileException)
+            {
+                golden = null;
+            }
+        }
+        else
+        {
+            golden = GoldenFile.Load(opt.GoldenPath);
+        }
 
         int[] sampleTicks = NormaliseSampleTicks(
             golden?.SampleTicks ?? new[] { opt.Ticks / 4, opt.Ticks / 2, opt.Ticks * 3 / 4, opt.Ticks },
@@ -164,6 +187,27 @@ public static class BenchRunner
                 phaseNs, finalHash!, sampleHashes!);
             WriteReport(opt, upReport, stdout);
             return 0;
+        }
+
+        // 8b. --require-gates: a plain verify run that would SKIP its gates is a
+        // misconfiguration, not a pass — the golden has lost its anchor to the run
+        // params. Report it as SKIPPED (unchanged) but exit 3 instead of 0.
+        if (opt.RequireGates && !gatesApply)
+        {
+            string why =
+                golden == null ? "golden file absent"
+                : golden.Scale != opt.Scale
+                    ? $"scale mismatch: golden.Scale={golden.Scale} opt.Scale={opt.Scale}"
+                : golden.Ticks != opt.Ticks
+                    ? $"ticks mismatch: golden.Ticks={golden.Ticks} opt.Ticks={opt.Ticks}"
+                : "gates do not apply";
+            stdout.WriteLine(
+                $"bench: --require-gates set but gates do not apply ({why}) — " +
+                "regenerate the golden with --update-golden");
+            var rgReport = BuildReport(opt, minNs, medianNs, golden, "SKIPPED",
+                phaseNs, finalHash!, sampleHashes!);
+            WriteReport(opt, rgReport, stdout);
+            return 3;
         }
 
         // 9. gates.

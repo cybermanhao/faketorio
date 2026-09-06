@@ -21,8 +21,10 @@
 | `--update-golden` | — | 用本次实测重写 golden(不跑哈希/性能门禁) |
 | `--json` | — | 报告 JSON 同时打到 stdout |
 | `--selftest` | — | 自检(sentinel + 短跑),不碰 golden |
+| `--require-gates` | — | 门禁 SKIP 时(golden 缺失 / `scale`、`ticks` 与运行参数不符)不再返回 0,而是打印原因并退 3。CI 用它:防止有人改了 `DefaultScale`/`DefaultTicks` 或 `golden.json` 却没重新生成 golden,门禁被静默跳过还是绿。与 `--update-golden` 同用时不影响,更新照常走(退 0)。 |
 
-非默认 `--scale` / `--ticks` 时哈希与性能门禁都 SKIP(golden 只钉默认规模)。
+非默认 `--scale` / `--ticks` 时哈希与性能门禁都 SKIP(golden 只钉默认规模);
+加 `--require-gates` 则此时退 3。
 
 ## 退出码
 
@@ -31,8 +33,9 @@
 | 0 | 通过(或非默认参数 / baseline 未校准,门禁 SKIP) |
 | 1 | 状态哈希与 golden 不符 |
 | 2 | 最快趟 nsPerTick > baseline × perfFailMultiplier(baseline ≤ 0 时此码不触发) |
-| 3 | sentinel 断言失败 / 参数非法 / golden 缺失或损坏 |
+| 3 | sentinel 断言失败 / 参数非法 / golden 缺失或损坏 / `--require-gates` 但门禁不适用 |
 | 4 | 趟间哈希不一致(模拟有非确定性) |
+| 5 | `--selftest` 自检失败 |
 
 ## golden.json
 

@@ -35,12 +35,12 @@ public static class ScenarioBuilder
 {
     // 世界种子 + 单元阵列原点。Task 5 实测选定:10 个候选种子 x 42 个原点偏移
     // 全扫一遍(探针表见 task-5-report.md),这一组给出 RejectedCommandCount == 0
-    // 且 fed drill 占比最高的一档 —— 800 台采矿机里 137 台脚下有铁矿(17.1%)。
+    // 且 fed drill 占比最高的一档 —— scale 50 下 200 台采矿机里 26 台脚下有铁矿(~13%)。
     //
-    // 【为什么只有 17%】铁矿是 fbm 噪声层,thresholdQ16 = 45000 且要和 coal /
+    // 【为什么这么低】铁矿是 fbm 噪声层,thresholdQ16 = 45000 且要和 coal /
     // copper / stone 三层抢格子,实测全局铁矿覆盖率只有 ~11%;又因为噪声
     // latticeSize = 64 而一个单元的 4 台采矿机挤在 14x2 格里,4 台几乎总是同生共死,
-    // "多摇几次骰子"的独立性红利拿不到。17% 已经是这套几何能摸到的天花板。
+    // "多摇几次骰子"的独立性红利拿不到。~13% 已经是这套几何能摸到的天花板。
     public const long WorldSeed = 20260905L;
 
     public const int DefaultScale = 50;

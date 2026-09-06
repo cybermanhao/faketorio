@@ -5,9 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -17,6 +25,7 @@ jobs:
 
   bench:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -25,7 +34,7 @@ jobs:
       - name: Run benchmark
         run: |
           set -o pipefail
-          dotnet run -c Release --project sim/Faketorio.Sim.Bench -- --json --golden bench/golden.json --report bench/bench-report.json | tee bench-stdout.txt
+          dotnet run -c Release --project sim/Faketorio.Sim.Bench -- --json --require-gates --golden bench/golden.json --report bench/bench-report.json | tee bench-stdout.txt
       - name: Append report to job summary
         if: always()
         run: |

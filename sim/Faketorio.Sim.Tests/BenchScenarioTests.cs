@@ -35,6 +35,24 @@ public class BenchScenarioTests
         Assert.True(o.SelfTest);
 
         Assert.Throws<ArgumentException>(() => BenchOptions.Parse(new[] { "--bogus" }));
+        Assert.Throws<ArgumentException>(() => BenchOptions.Parse(new[] { "--iterations", "0" }));
+    }
+
+    [Fact]
+    public void Runner_RequireGates_NonDefaultScale_Returns3()
+    {
+        string golden = Path.Combine(Path.GetTempPath(), $"g-{Guid.NewGuid():N}.json");
+        string report = Path.Combine(Path.GetTempPath(), $"r-{Guid.NewGuid():N}.json");
+        var mk = new BenchOptions(Scale: 1, Ticks: 60, Warmup: 0, Iterations: 2,
+            GoldenPath: golden, ReportPath: report, UpdateGolden: true, Json: false, SelfTest: false);
+        Assert.Equal(0, BenchRunner.Run(mk, TextWriter.Null)); // write golden anchored at scale 1 / ticks 60
+
+        var mismatch = mk with { UpdateGolden = false, Scale = 2 }; // scale 2 != golden.Scale 1
+        Assert.Equal(0, BenchRunner.Run(mismatch, TextWriter.Null)); // SKIPPED gate → 0 without --require-gates
+        Assert.Equal(3, BenchRunner.Run(mismatch with { RequireGates = true }, TextWriter.Null));
+
+        File.Delete(golden);
+        File.Delete(report);
     }
 
     [Fact]
