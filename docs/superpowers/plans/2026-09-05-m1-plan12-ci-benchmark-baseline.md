@@ -1,5 +1,14 @@
 # M1 Plan 12 — CI 基准场景 + 回归基线 Implementation Plan
 
+> **状态:✅ 已合并 `main`(`c42ef1d`..`66bce92`,merge `66bce92`)· 423/423 测试通过 · Release 构建 0/0 · benchmark 已验证(`--golden bench/golden.json` → exit 0,gate PASS)。**
+> 执行期裁定:
+> - **R1**(事前扫描):`IronUnitPart` 公开 `EntitiesPerUnit` 常量 + `PerUnitRatedDemand(ScenarioProtoIds)` 静态方法,供 `ScenarioBuilder` 消费。
+> - **R2**(事前扫描):Task 1 提交的测试去掉 no-op 断言,并断言 `Begins[Electric] == 10`(pre + settle 各一段)。
+> - **R3**(Task 5):`data/base` 铁矿石覆盖率 ~11% + 单元 4 台采矿机同噪声晶格,fed drill 只有 ~13%(scale 50)/ ~17%(scale 200)——接受;sentinel 的 fed-drill 下界自校准到实测值,采矿链/传送带/熔炉/机械臂/电网仍被压到,golden 哈希照抓行为变化。矿脉层增强另立项。
+> - **R4**(Task 5):`ScenarioSentinel` #2 的矿量下界改为 `MinableOre > FedDrillCount * (DefaultTicks / MiningTimeTicks)`(`MiningTimeTicks` 运行时从原型读)。计划原文的 `* DefaultTicks` 是算术错误。
+> - **R5**(Task 8):默认基准从 scale 200 / 20000 tick / 5 iterations(实测 ~28 分钟,CI 不可用)缩到 **scale 50 / 5000 tick / 3 iterations**;`ScenarioSentinel` 的 10 个 `DefaultScale*` 常量在 scale 50 重新钉死;`--scale`/`--ticks` 留作手动重压测。
+> - **遗留**:`bench/golden.json` 的 `baselineNsPerTick` 以 `0`(未校准)出厂——性能红线的退化告警半边待人工从首次绿色 CI 的 `bench-report` artifact 回填激活(`bench/README.md` 有流程);哈希红线即时生效。最终审查另加了 `--require-gates`(CI 已带):改了默认规模却没重生成 golden 时 CI 报红而非静默假绿。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给仓库加一个独立 benchmark 项目 + 固定种子中型工厂场景 + `IStepProfiler` 分阶段计时 + `bench/golden.json`(状态哈希 golden 值 + 自校准性能红线)+ 仓库首个 GitHub Actions CI(test job + bench job)。
