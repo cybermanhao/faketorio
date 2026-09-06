@@ -18,19 +18,27 @@ public sealed class ElectricGrid
     private readonly Dictionary<EntityId, Q16> _satisfaction = new();
 
     private readonly Dictionary<EntityId, long> _fuelBufferJ = new();
+    private readonly Faketorio.Sim.OrderedEntityIdList _generatorOrder = new();
+    public IReadOnlyList<EntityId> GeneratorIds => _generatorOrder.Ids;
 
-    public void RegisterGenerator(EntityId id) => _fuelBufferJ[id] = 0;
-    public void UnregisterGenerator(EntityId id) => _fuelBufferJ.Remove(id);
+    public void RegisterGenerator(EntityId id)
+    {
+        _fuelBufferJ[id] = 0;
+        _generatorOrder.Add(id);
+    }
+    public void UnregisterGenerator(EntityId id)
+    {
+        _fuelBufferJ.Remove(id);
+        _generatorOrder.Remove(id);
+    }
     public long GetFuelBufferJ(EntityId id) => _fuelBufferJ.TryGetValue(id, out var v) ? v : 0;
     public void SetFuelBufferJ(EntityId id, long value) => _fuelBufferJ[id] = value;
 
     // 只序列化燃料缓冲——连通分量/结算结果都是每 tick 派生数据,不持久化。
     public void WriteState(Faketorio.Sim.State.IStateWriter writer)
     {
-        var ids = new List<EntityId>(_fuelBufferJ.Keys);
-        ids.Sort((a, b) => a.Index.CompareTo(b.Index));
-        writer.Write(ids.Count);
-        foreach (var id in ids)
+        writer.Write(_generatorOrder.Count);
+        foreach (var id in _generatorOrder.Ids)
         {
             writer.Write(id.Index);
             writer.Write(id.Generation);

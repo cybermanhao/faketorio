@@ -59,4 +59,18 @@ public class ActiveIdListTests
         ins.UnregisterInserter(new EntityId(4, 1));   // 再删一次,no-op
         Assert.Equal(new[] { 1, 6 }, Idx(ins.ActiveIds));
     }
+
+    [Fact]
+    public void ElectricGrid_GeneratorIds_TracksRegisterUnregister_InIndexOrder()
+    {
+        var g = new Faketorio.Sim.Electric.ElectricGrid();
+        g.RegisterGenerator(new EntityId(9, 1));
+        g.RegisterGenerator(new EntityId(3, 1));
+        g.RegisterGenerator(new EntityId(6, 1));
+        Assert.Equal(new[] { 3, 6, 9 }, Idx(g.GeneratorIds));
+        g.UnregisterGenerator(new EntityId(6, 1));
+        Assert.Equal(new[] { 3, 9 }, Idx(g.GeneratorIds));
+        g.UnregisterGenerator(new EntityId(100, 1));   // 没注册
+        Assert.Equal(new[] { 3, 9 }, Idx(g.GeneratorIds));
+    }
 }

@@ -506,16 +506,14 @@ public sealed class Simulation
         if (isInserter) Inserters.UnregisterInserter(id);
     }
 
-    // 扫实体池找发电机(同 belt 推进/WriteState 的索引序扫法,不给 ElectricGrid
-    // 塞 Inventories/Prototypes 依赖)。登记「有燃料就能出满功率,没燃料出 0」。
+    // 遍历 ElectricGrid.GeneratorIds(升序活跃列表,不给 ElectricGrid 塞
+    // Inventories/Prototypes 依赖)。登记「有燃料就能出满功率,没燃料出 0」。
     private void ElectricGeneratorsRegisterSupply()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in ElectricGrid.GeneratorIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not FuelGeneratorPrototype gen) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
             long buf = ElectricGrid.GetFuelBufferJ(id);
             var fuelInv = Inventories.Get(Inventories.GetInventoryId(id));
             bool hasFuel = buf > 0 || fuelInv.CountOf(gen.FuelItemProtoId) > 0;
@@ -525,12 +523,10 @@ public sealed class Simulation
 
     private void ElectricGeneratorsBurnFuel()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in ElectricGrid.GeneratorIds)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not FuelGeneratorPrototype gen) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
             long actual = ElectricGrid.GetAllocatedSupply(id);
             long buf = ElectricGrid.GetFuelBufferJ(id);
             var fuelInv = Inventories.Get(Inventories.GetInventoryId(id));
