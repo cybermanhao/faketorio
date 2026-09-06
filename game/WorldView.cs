@@ -25,11 +25,17 @@ public partial class WorldView : Node2D
     /// 待填充的 chunk 队列上限。平移比填充快时就停止入队(矿慢一点点淡入,不卡)。
     private const int MaxPendingOreChunks = 256;
 
+    /// _oreCache 的硬上限。远距离低缩放平移会无限撑大缓存,按插入顺序淘汰最旧的。
+    /// 512 远大于任何缩放下的可见 chunk 集(几十个),所以来回滚轮/局部平移全命中。
+    private const int MaxOreCacheChunks = 512;
+
     private SimHost _host = null!;
     private CameraController _cam = null!;
     private BuildController _build = null!;
 
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
+    // _oreCache 的插入顺序,用于有界淘汰(每个 ck 一生只入队一次,见 FillPendingOreChunks 的 ContainsKey 门)。
+    private readonly Queue<long> _oreCacheOrder = new();
     // PeekChunk 的复用缓冲:每次填一个显示 chunk 先灌进这里,再拷进 _oreCache 的独立数组。
     private readonly ResourceCell[] _chunkFillBuf = new ResourceCell[32 * 32];
     // _Draw 命中未缓存 chunk 时把 key 丢这里,_Process 每帧摊几个填进 _oreCache。
@@ -76,6 +82,12 @@ public partial class WorldView : Node2D
             var arr = new ResourceCell[32 * 32];
             System.Array.Copy(_chunkFillBuf, arr, 32 * 32);
             _oreCache[ck] = arr;
+            _oreCacheOrder.Enqueue(ck);
+            while (_oreCacheOrder.Count > MaxOreCacheChunks)
+            {
+                long old = _oreCacheOrder.Dequeue();
+                _oreCache.Remove(old);   // ck 一生只入队一次,无需重复守卫
+            }
         }
     }
 
