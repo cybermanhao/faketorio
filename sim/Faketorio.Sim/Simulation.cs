@@ -3,6 +3,7 @@ using Faketorio.Sim.Commands;
 using Faketorio.Sim.Electric;
 using Faketorio.Sim.Entities;
 using Faketorio.Sim.Items;
+using Faketorio.Sim.Profiling;
 using Faketorio.Sim.Prototypes;
 using Faketorio.Sim.State;
 using Faketorio.Sim.World;
@@ -29,16 +30,18 @@ public sealed class Simulation
 
     private readonly long _worldSeed;
     private readonly PlayerPrototype _playerProto;
+    private readonly IStepProfiler? _profiler;
 
     public long Tick { get; private set; }
     public int RejectedCommandCount { get; private set; }
 
     private readonly CommandQueue _commands = new();
 
-    public Simulation(PrototypeRegistry prototypes, long worldSeed = 0)
+    public Simulation(PrototypeRegistry prototypes, long worldSeed = 0, IStepProfiler? profiler = null)
     {
         Prototypes = prototypes;
         _worldSeed = worldSeed;
+        _profiler = profiler;
         Resources = new ResourceGrid(worldSeed, prototypes);
         if (!prototypes.TryGet<PlayerPrototype>("player", out var pp))
             throw new InvalidOperationException("No 'player' prototype in the registry");
@@ -55,28 +58,40 @@ public sealed class Simulation
 
     public void Step()
     {
+        _profiler?.Begin(StepPhase.Commands);
         var commands = _commands.BeginTick();
         for (int i = 0; i < commands.Length; i++)
             Apply(in commands[i]);
+        _profiler?.End(StepPhase.Commands);
 
         // 玩家 tick:① 行走(碰撞) ② 挖掘(Task 3) ③ 合成(Task 4)
+        _profiler?.Begin(StepPhase.Player);
         PlayerWalk();
         PlayerMine();
         PlayerCraft();
+        _profiler?.End(StepPhase.Player);
 
         // 电网 + 加工 + 采矿:① 发电机登记供给 ② 机器/采矿机登记需求 ③ 结算
         // ④ 发电机烧油 ⑤ 机器/采矿机推进+完成
+        _profiler?.Begin(StepPhase.Electric);
         ElectricGeneratorsRegisterSupply();
-        MachinesTickPreSettle();
-        MiningDrillsTickPreSettle();
-        InsertersTickPreSettle();
+        _profiler?.End(StepPhase.Electric);
+
+        _profiler?.Begin(StepPhase.Machines);     MachinesTickPreSettle();      _profiler?.End(StepPhase.Machines);
+        _profiler?.Begin(StepPhase.MiningDrills); MiningDrillsTickPreSettle();  _profiler?.End(StepPhase.MiningDrills);
+        _profiler?.Begin(StepPhase.Inserters);    InsertersTickPreSettle();     _profiler?.End(StepPhase.Inserters);
+
+        _profiler?.Begin(StepPhase.Electric);
         ElectricGrid.Settle();
         ElectricGeneratorsBurnFuel();
-        MachinesTickPostSettle();
-        MiningDrillsTickPostSettle();
-        InsertersTickPostSettle();
+        _profiler?.End(StepPhase.Electric);
+
+        _profiler?.Begin(StepPhase.Machines);     MachinesTickPostSettle();     _profiler?.End(StepPhase.Machines);
+        _profiler?.Begin(StepPhase.MiningDrills); MiningDrillsTickPostSettle(); _profiler?.End(StepPhase.MiningDrills);
+        _profiler?.Begin(StepPhase.Inserters);    InsertersTickPostSettle();    _profiler?.End(StepPhase.Inserters);
 
         // 传送带:推进(按 Belts 池索引序,确定)
+        _profiler?.Begin(StepPhase.BeltAdvance);
         for (int bi = 0; bi < Belts.Capacity; bi++)
         {
             if (!Belts.IsAliveAtIndex(bi)) continue;
@@ -85,7 +100,10 @@ public sealed class Simulation
             line.LaneA.Advance(speed);
             line.LaneB.Advance(speed);
         }
+        _profiler?.End(StepPhase.BeltAdvance);
+
         // 传送带:线间交接(拐角处把出口物品传给下游线;不检查方向)
+        _profiler?.Begin(StepPhase.BeltHandoff);
         for (int bi = 0; bi < Belts.Capacity; bi++)
         {
             if (!Belts.IsAliveAtIndex(bi)) continue;
@@ -100,6 +118,8 @@ public sealed class Simulation
             while (line.LaneA.IsFrontReady && down.LaneA.TryInsertAtBack(line.LaneA.FrontItemProtoId)) line.LaneA.RemoveFront();
             while (line.LaneB.IsFrontReady && down.LaneB.TryInsertAtBack(line.LaneB.FrontItemProtoId)) line.LaneB.RemoveFront();
         }
+        _profiler?.End(StepPhase.BeltHandoff);
+
         Tick++;
     }
 
