@@ -51,6 +51,21 @@ public sealed class ResourceGrid
         return chunk.TypeId[i] == 0 ? ResourceCell.Empty : new ResourceCell(chunk.TypeId[i], chunk.Amount[i]);
     }
 
+    // 无副作用读:已生成 chunk 直接读;未生成则临时 Generate 一个瞬时 chunk 读完丢弃,
+    // 不进 _chunks、不置 _keysDirty —— 供表现层在"地图模式"下自由平移查矿而不改状态哈希。
+    // Generate 是 (seed, chunk 基点) 纯函数,所以 Peek 结果与之后 GetResourceAt 一致。
+    public ResourceCell PeekResourceAt(int x, int y)
+    {
+        long key = ChunkKey(x, y);
+        if (!_chunks.TryGetValue(key, out var chunk))
+        {
+            chunk = new ResourceChunk();
+            Generate(x, y, chunk);
+        }
+        int i = TileIndex(x, y);
+        return chunk.TypeId[i] == 0 ? ResourceCell.Empty : new ResourceCell(chunk.TypeId[i], chunk.Amount[i]);
+    }
+
     public int Extract(int x, int y, int count)
     {
         if (count <= 0) return 0;

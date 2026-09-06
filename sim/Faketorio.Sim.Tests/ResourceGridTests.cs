@@ -1,3 +1,4 @@
+using Faketorio.Sim;
 using Faketorio.Sim.Prototypes;
 using Faketorio.Sim.State;
 using Faketorio.Sim.World;
@@ -139,6 +140,43 @@ public class ResourceGridTests
         var before = Hash(g);
         g.Extract(6, -8, 50);
         Assert.NotEqual(before, Hash(g));
+    }
+
+    [Fact]
+    public void PeekResourceAt_MatchesGetResourceAt_AndHasNoSideEffect()
+    {
+        var protos = PrototypeLoader.LoadFromDirectory("data/base");
+        var grid = new ResourceGrid(123456789L, protos);
+
+        // 选一批"远处"坐标(跨多个未生成 chunk)
+        var probes = new (int x, int y)[] { (500, 500), (501, 500), (-800, 320), (77, -1234), (2048, 2048) };
+
+        int chunksBefore = grid.GeneratedChunkCount;
+        var peeked = probes.Select(p => grid.PeekResourceAt(p.x, p.y)).ToArray();
+
+        // 无副作用:Peek 不生成 chunk
+        Assert.Equal(chunksBefore, grid.GeneratedChunkCount);
+
+        // 内容一致:Peek 的结果 == 之后 GetResourceAt 的结果
+        for (int i = 0; i < probes.Length; i++)
+            Assert.Equal(grid.GetResourceAt(probes[i].x, probes[i].y), peeked[i]);
+
+        // 已生成 chunk 上:Peek == Get
+        Assert.Equal(grid.GetResourceAt(500, 500), grid.PeekResourceAt(500, 500));
+    }
+
+    [Fact]
+    public void PeekResourceAt_DoesNotChangeStateHash()
+    {
+        var sim = new Simulation(PrototypeLoader.LoadFromDirectory("data/base"), 123456789L);
+        sim.Step();
+        ulong before = sim.ComputeStateHash();
+
+        for (int gx = -3; gx <= 3; gx++)
+            for (int gy = -3; gy <= 3; gy++)
+                sim.Resources.PeekResourceAt(gx * 40 + 1000, gy * 40 + 1000);   // 一堆远处虚拟坐标
+
+        Assert.Equal(before, sim.ComputeStateHash());
     }
 
     [Fact]
