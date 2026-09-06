@@ -19,14 +19,20 @@ public partial class WorldView : Node2D
 
     /// 每帧最多填充几个 32x32 的矿缓存块——PeekResourceAt 对未生成的 chunk 会
     /// 临时 Generate 一整块再丢弃,一次填满整屏会卡顿,所以摊到多帧。
-    private const int MaxOreChunkFillsPerFrame = 2;
+    /// 关键:填充只在 _Process 里跑,_Draw 绝不同步生成 chunk。
+    private const int MaxOreChunkFillsPerFrame = 4;
+
+    /// 待填充的 chunk 队列上限。平移比填充快时就停止入队(矿慢一点点淡入,不卡)。
+    private const int MaxPendingOreChunks = 256;
 
     private SimHost _host = null!;
     private CameraController _cam = null!;
     private BuildController _build = null!;
 
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
-    private int _oreFillsThisFrame;
+    // _Draw 命中未缓存 chunk 时把 key 丢这里,_Process 每帧摊几个填进 _oreCache。
+    private readonly HashSet<long> _pendingOreChunks = new();
+    private readonly List<long> _oreFillScratch = new();
 
     public override void _Ready()
     {
@@ -35,12 +41,44 @@ public partial class WorldView : Node2D
         _build = GetNode<BuildController>("../BuildController");
     }
 
-    public override void _Process(double delta) => QueueRedraw();
+    public override void _Process(double delta)
+    {
+        FillPendingOreChunks();
+        QueueRedraw();
+    }
+
+    // 每帧摊几个待填 chunk 进缓存。这是唯一会调用 PeekResourceAt(可能触发 Generate)的地方。
+    private void FillPendingOreChunks()
+    {
+        if (_pendingOreChunks.Count == 0) return;
+
+        _oreFillScratch.Clear();
+        foreach (var ck in _pendingOreChunks)
+        {
+            _oreFillScratch.Add(ck);
+            if (_oreFillScratch.Count >= MaxOreChunkFillsPerFrame) break;
+        }
+
+        var res = _host.Sim.Resources;
+        foreach (var ck in _oreFillScratch)
+        {
+            _pendingOreChunks.Remove(ck);
+            if (_oreCache.ContainsKey(ck)) continue;
+
+            int cx = (int)(ck >> 32);
+            int cy = (int)(ck & 0xFFFFFFFFL);
+            int bx = cx << 5, by = cy << 5;
+
+            var arr = new ResourceCell[32 * 32];
+            for (int ly = 0; ly < 32; ly++)
+                for (int lx = 0; lx < 32; lx++)
+                    arr[ly * 32 + lx] = res.PeekResourceAt(bx + lx, by + ly);
+            _oreCache[ck] = arr;
+        }
+    }
 
     public override void _Draw()
     {
-        _oreFillsThisFrame = 0;
-
         var t = _cam.WorldXform;
         // 第一帧 CameraController._Process 可能还没跑过,视口尺寸是 (0,0) —— 这帧啥也别画。
         if (t.ViewportSizePx.X < 1 || t.ViewportSizePx.Y < 1) return;
@@ -49,12 +87,10 @@ public partial class WorldView : Node2D
         var sim = _host.Sim;
         float ppt = (float)t.PixelsPerTile;
 
-        // 1. 地块底色:整片一次画完(逐格 DrawRect 在低缩放下是十万级 draw call)
-        {
-            var tl = t.TileToScreen(vis.MinX, vis.MinY).ToGodot();
-            var br = t.TileToScreen(vis.MaxX, vis.MaxY).ToGodot();
-            DrawRect(new Rect2(tl, br - tl), new Color(0.11f, 0.12f, 0.11f));
-        }
+        // 1. 地块底色:整个视口一次画完(逐格 DrawRect 在低缩放下是十万级 draw call)
+        DrawRect(
+            new Rect2(Vector2.Zero, new Vector2((float)t.ViewportSizePx.X, (float)t.ViewportSizePx.Y)),
+            new Color(0.11f, 0.12f, 0.11f));
 
         // 2. 网格 gizmo
         if (ShowGrid && t.PixelsPerTile >= 6)
@@ -161,24 +197,22 @@ public partial class WorldView : Node2D
         }
     }
 
-    // 按 32x32 块缓存 Peek 结果。缓存未命中且本帧填充配额用光时返回 false(这一格这帧不画)。
+    // 按 32x32 块缓存 Peek 结果。缓存未命中时:登记该 chunk 待后台填充,这帧这一格不画
+    // (返回 false → 透明,深色底透出来)。绝不在 _Draw 里同步 PeekResourceAt 未生成的 chunk。
     private bool TryPeekOre(int x, int y, out ResourceCell cell)
     {
         long ck = ((long)(x >> 5) << 32) | (uint)(y >> 5);
-        if (!_oreCache.TryGetValue(ck, out var arr))
+        if (_oreCache.TryGetValue(ck, out var arr))
         {
-            if (_oreFillsThisFrame >= MaxOreChunkFillsPerFrame) { cell = default; return false; }
-            _oreFillsThisFrame++;
-
-            arr = new ResourceCell[32 * 32];
-            int bx = (x >> 5) << 5, by = (y >> 5) << 5;
-            for (int ly = 0; ly < 32; ly++)
-                for (int lx = 0; lx < 32; lx++)
-                    arr[ly * 32 + lx] = _host.Sim.Resources.PeekResourceAt(bx + lx, by + ly);
-            _oreCache[ck] = arr;
+            cell = arr[(y & 31) * 32 + (x & 31)];
+            return true;
         }
-        cell = arr[(y & 31) * 32 + (x & 31)];
-        return true;
+
+        // 平移太快、待填队列已满时就不再入队——矿慢几帧淡入即可,不阻塞。
+        if (_pendingOreChunks.Count < MaxPendingOreChunks)
+            _pendingOreChunks.Add(ck);
+        cell = default;
+        return false;
     }
 
     // BeltLane 的 PositionedItem.LeadingEdgeSubTiles 是"物品前沿离**出口**多少亚格"。

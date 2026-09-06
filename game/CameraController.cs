@@ -22,7 +22,7 @@ public partial class CameraController : Node
 
     // Follow 近景窄区间;Free 放宽
     private const double FollowMinPpt = 32, FollowMaxPpt = 64;
-    private const double FreeMinPpt = 4, FreeMaxPpt = 64;
+    private const double FreeMinPpt = 6, FreeMaxPpt = 64;
     private const double SnapDuration = 0.25;
 
     private double _ppt = 48;
