@@ -506,16 +506,14 @@ public sealed class Simulation
         if (isInserter) Inserters.UnregisterInserter(id);
     }
 
-    // 扫实体池找发电机(同 belt 推进/WriteState 的索引序扫法,不给 ElectricGrid
-    // 塞 Inventories/Prototypes 依赖)。登记「有燃料就能出满功率,没燃料出 0」。
+    // 遍历 ElectricGrid.GeneratorIds(升序活跃列表,不给 ElectricGrid 塞
+    // Inventories/Prototypes 依赖)。登记「有燃料就能出满功率,没燃料出 0」。
     private void ElectricGeneratorsRegisterSupply()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in ElectricGrid.GeneratorIdList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not FuelGeneratorPrototype gen) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
             long buf = ElectricGrid.GetFuelBufferJ(id);
             var fuelInv = Inventories.Get(Inventories.GetInventoryId(id));
             bool hasFuel = buf > 0 || fuelInv.CountOf(gen.FuelItemProtoId) > 0;
@@ -525,12 +523,10 @@ public sealed class Simulation
 
     private void ElectricGeneratorsBurnFuel()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in ElectricGrid.GeneratorIdList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not FuelGeneratorPrototype gen) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var gen = (FuelGeneratorPrototype)Prototypes.GetById(data.ProtoId);
             long actual = ElectricGrid.GetAllocatedSupply(id);
             long buf = ElectricGrid.GetFuelBufferJ(id);
             var fuelInv = Inventories.Get(Inventories.GetInventoryId(id));
@@ -549,12 +545,10 @@ public sealed class Simulation
     // 先登记完需求,ElectricGrid.Settle() 才能看到本 tick 完整的需求总量。
     private void MachinesTickPreSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Machines.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not CraftingMachinePrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
             MachineTickPreSettle(id, proto, data.X, data.Y);
         }
     }
@@ -612,12 +606,10 @@ public sealed class Simulation
     // 加工:进度推进 + 完成校验(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MachinesTickPostSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Machines.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not CraftingMachinePrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
             MachineTickPostSettle(id, proto);
         }
     }
@@ -661,12 +653,10 @@ public sealed class Simulation
     // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
     private void MiningDrillsTickPreSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in MiningDrills.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPreSettle(id, proto, data.X, data.Y, data.Rotation);
         }
     }
@@ -741,12 +731,10 @@ public sealed class Simulation
     // 采矿:进度推进 + 产出(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MiningDrillsTickPostSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in MiningDrills.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not MiningDrillPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPostSettle(id, proto);
         }
     }
@@ -775,12 +763,10 @@ public sealed class Simulation
     // 那种 pre-settle 工作,只登记恒定待机能耗。
     private void InsertersTickPreSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Inserters.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
             ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
         }
     }
@@ -789,12 +775,10 @@ public sealed class Simulation
     // 机械臂看到的是本 tick 开头的传送带状态)。两趟扫描的第二趟。
     private void InsertersTickPostSettle()
     {
-        for (int i = 0; i < Entities.Capacity; i++)
+        foreach (var id in Inserters.ActiveIdsList)
         {
-            if (!Entities.IsAliveAtIndex(i)) continue;
-            ref var data = ref Entities.GetAtIndex(i);
-            if (!Prototypes.TryGetById(data.ProtoId, out var p) || p is not InserterPrototype proto) continue;
-            var id = new EntityId(i, Entities.GenerationAtIndex(i));
+            ref var data = ref Entities.Get(id);
+            var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
             InserterTickPostSettle(id, proto, data.X, data.Y, data.Rotation);
         }
     }
@@ -806,7 +790,6 @@ public sealed class Simulation
         int dropX = x + dx, dropY = y + dy;   // 身前
         int held = Inserters.GetHeldItemProtoId(id);
         long progress = Inserters.GetSwingProgress(id);
-        long delta = proto.RotationSpeed.Mul(ElectricGrid.GetSatisfaction(id).Raw);
 
         // 阶段 A:空手停在抓取角 —— 尝试抓
         if (held == 0 && progress == 0)
@@ -843,6 +826,8 @@ public sealed class Simulation
             }
             return;   // 抓到就进阶段 B(下 tick);抓不到就下 tick 再试
         }
+
+        long delta = proto.RotationSpeed.Mul(ElectricGrid.GetSatisfaction(id).Raw);
 
         // 阶段 B:往外摆,拿着物品 —— 推进到 HalfSwing 后尝试放
         if (held != 0)

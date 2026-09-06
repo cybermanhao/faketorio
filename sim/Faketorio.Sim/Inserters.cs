@@ -17,9 +17,23 @@ public sealed class Inserters
     public const long FullSwing = HalfSwing * 2; // 一整个周期(抓 → 摆出 → 放 → 摆回)
 
     private readonly Dictionary<EntityId, InserterState> _states = new();
+    private readonly OrderedEntityIdList _order = new();
 
-    public void RegisterInserter(EntityId id) => _states[id] = new InserterState(0, 0);
-    public void UnregisterInserter(EntityId id) => _states.Remove(id);
+    public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
+    internal List<EntityId> ActiveIdsList => _order.IdsList;
+    internal int StateCount => _states.Count;
+
+    public void RegisterInserter(EntityId id)
+    {
+        _states[id] = new InserterState(0, 0);
+        _order.Add(id);
+    }
+
+    public void UnregisterInserter(EntityId id)
+    {
+        _states.Remove(id);
+        _order.Remove(id);
+    }
 
     public int GetHeldItemProtoId(EntityId id) => _states.TryGetValue(id, out var s) ? s.HeldItemProtoId : 0;
     public long GetSwingProgress(EntityId id) => _states.TryGetValue(id, out var s) ? s.SwingProgress : 0;
@@ -55,10 +69,8 @@ public sealed class Inserters
     // 按 EntityId.Index 排序后写:index/代数/手上物品 id/摆臂进度。
     public void WriteState(IStateWriter writer)
     {
-        var ids = new List<EntityId>(_states.Keys);
-        ids.Sort((a, b) => a.Index.CompareTo(b.Index));
-        writer.Write(ids.Count);
-        foreach (var id in ids)
+        writer.Write(_order.Count);
+        foreach (var id in _order.Ids)
         {
             var s = _states[id];
             writer.Write(id.Index);
