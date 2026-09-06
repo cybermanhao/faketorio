@@ -686,7 +686,11 @@ public sealed class Simulation
             if (outLineId.IsValid)
             {
                 var outLine = Belts.GetLine(outLineId);
-                placed = outLine.LaneA.TryInsertAtBack(itemId) || outLine.LaneB.TryInsertAtBack(itemId);
+                var (bdx, bdy) = BeltNetwork.Delta(outLine.Direction);
+                // 采矿机朝向 (dx, dy) vs 带行进方向:平行 -> 右侧 lane;正交 -> 远端 lane。
+                // 选定的 lane 满了就卡住(pending 不 flush),不回退到另一条。
+                var outLane = BeltNetwork.FeedsRightLane(dx, dy, bdx, bdy) ? outLine.LaneB : outLine.LaneA;
+                placed = outLane.TryInsertAtBack(itemId);
             }
             else
             {
@@ -853,7 +857,11 @@ public sealed class Simulation
                 var line = Belts.GetLine(dropLineId);
                 int k = line.Tiles.IndexOf((dropX, dropY));
                 int pos = k * BeltLine.TileSubTiles + BeltLine.TileSubTiles / 2;   // 格中心
-                released = line.LaneA.TryInsertAt(pos, held) || line.LaneB.TryInsertAt(pos, held);
+                var (bdx, bdy) = BeltNetwork.Delta(line.Direction);
+                // 机械臂朝向 (dx, dy) vs 带行进方向:平行 -> 右侧 lane;正交 -> 远端 lane。
+                // 选定的 lane 满了就卡住(held 留手),不回退到另一条。
+                var dropLane = BeltNetwork.FeedsRightLane(dx, dy, bdx, bdy) ? line.LaneB : line.LaneA;
+                released = dropLane.TryInsertAt(pos, held);
             }
             else
             {

@@ -73,7 +73,10 @@ public class BenchScenarioTests
         Assert.Equal(GOLDEN_TICK_800, h1[799]);
     }
 
-    private const ulong GOLDEN_TICK_800 = 1494511041091785676UL; // pinned on first run
+    // re-baselined when 传送带 lane 左右语义 + 按几何选边入料 landed (采矿机 / 机械臂
+    // 入料从 LaneA||LaneB 回退改成 BeltNetwork.FeedsRightLane 确定性选边);
+    // determinism assert (h1 == h2) unaffected, only the pinned anchor moves.
+    private const ulong GOLDEN_TICK_800 = 17279884607642786012UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
