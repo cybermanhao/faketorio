@@ -12,6 +12,9 @@ public sealed class Player
     public byte WalkDir { get; private set; }
     public bool Walking { get; private set; }
 
+    // 锚定:true 时传送带不带着玩家走。由将来的"锚定模块"子项翻转;本子项恒 false。
+    public bool Anchored { get; private set; }
+
     public bool Mining { get; private set; }
     public int MineTargetX { get; private set; }
     public int MineTargetY { get; private set; }
@@ -40,6 +43,7 @@ public sealed class Player
 
     internal void SetWalk(byte dir) { Walking = true; WalkDir = dir; }
     internal void StopWalk() => Walking = false;
+    internal void SetAnchored(bool value) => Anchored = value;
     internal void MoveTo(int x, int y) { X = x; Y = y; }
 
     internal void SetMineTarget(int x, int y)
@@ -71,6 +75,7 @@ public sealed class Player
         writer.Write(WalkDir);
         writer.Write((byte)(Walking ? 1 : 0));
         writer.Write((byte)(Mining ? 1 : 0));
+        writer.Write((byte)(Anchored ? 1 : 0));
         writer.Write(MineTargetX);
         writer.Write(MineTargetY);
         writer.Write(MineProgress);

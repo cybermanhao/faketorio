@@ -64,4 +64,26 @@ public class PlayerTests
         a.Inventory.Insert(100, 1, 50);
         Assert.NotEqual(Hash(a), Hash(b));
     }
+
+    [Fact]
+    public void Anchored_DefaultsFalse_AndSetAnchoredToggles()
+    {
+        var p = new Player(10);
+        Assert.False(p.Anchored);
+        p.SetAnchored(true);
+        Assert.True(p.Anchored);
+        p.SetAnchored(false);
+        Assert.False(p.Anchored);
+    }
+
+    [Fact]
+    public void Anchored_IsCoveredByWriteState()
+    {
+        var a = new Player(10);
+        var b = new Player(10);
+        Assert.Equal(Hash(a), Hash(b));      // 同状态同哈希
+
+        b.SetAnchored(true);
+        Assert.NotEqual(Hash(a), Hash(b));   // Anchored 进了序列化
+    }
 }

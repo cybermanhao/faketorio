@@ -73,10 +73,9 @@ public class BenchScenarioTests
         Assert.Equal(GOLDEN_TICK_800, h1[799]);
     }
 
-    // re-baselined when 传送带 lane 左右语义 + 按几何选边入料 landed (采矿机 / 机械臂
-    // 入料从 LaneA||LaneB 回退改成 BeltNetwork.FeedsRightLane 确定性选边);
-    // determinism assert (h1 == h2) unaffected, only the pinned anchor moves.
-    private const ulong GOLDEN_TICK_800 = 17279884607642786012UL;
+    // 因 Player.Anchored 入 WriteState(多一个 byte)+ 玩家碰撞模型改动重基线(P16)。
+    // determinism 断言(h1 == h2)不受影响,只有这个锚点值移动。
+    private const ulong GOLDEN_TICK_800 = 18091631391058336762UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
