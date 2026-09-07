@@ -6,7 +6,7 @@
 
 ## 进度快照(2026-09-06,更新)
 
-`main` 已含 P12(CI 回归基线)+ P13(活跃 id 列表,PR #1 已合)+ P14(表现层 v1)+ 传送带 lane 选边入料。`dotnet test sim/Faketorio.Sim.Tests` = **~445 passing**;`dotnet test Faketorio.sln` 含 `Presentation.Core.Tests`;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+`main` 已含 P12(CI 回归基线)+ P13(活跃 id 列表,PR #1 已合)+ P14(表现层 v1)+ 传送带 lane 选边入料 + P15(玩家 WASD + 相机跟随 + 手挖)。`dotnet test sim/Faketorio.Sim.Tests` = **446 passing**;`dotnet test Faketorio.sln` = 446 + 26 `Presentation.Core.Tests`;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
 
 | 子项目 | 状态 | 主线提交(合并后) |
 |---|---|---|
@@ -41,7 +41,9 @@ P14 执行期确认:表现层第一个子项落地 —— `presentation/Faketori
 
 传送带 lane 选边入料(横切):新增纯函数 `BeltNetwork.FeedsRightLane` —— `LaneA` = 行进方向左、`LaneB` = 右;源朝向与带行进平行 → 右侧 lane,正交 → 远端 lane。采矿机产出 / 机械臂放件从 `LaneA||LaneB` 回退改成按此确定性选边,目标 lane 满则源卡住不溢出。渲染器零改动(`DrawLaneItems` 约定本就一致)。golden 随行为变化重生成(`baselineNsPerTick` 仍 0);`BenchScenarioTests.GOLDEN_TICK_800` 锚点同步更新;determinism 断言不受影响。本地 `--no-ff` merge `69d9ed0`。
 
-下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)+ 活跃列表换路(P13)+ 表现层 v1(P14)+ 传送带 lane 选边入料 已完成。剩余候选(无强依赖顺序,按价值/成本挑):① **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;单独 brainstorm);② 机器输入库存加过滤 + "销毁掉落物品"统一处理;③ `RotateEntity` 命令(仅在要让玩家事后转向时);④ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,从首次绿色 CI artifact 回填);⑤ **表现层后续**:玩家 WASD 控制 + 相机跟随移动的玩家、视觉插值 lerp(要解决传送带物品跨 tick 身份匹配)、真美术(骨骼变换 vs 预渲染帧表)、完整命令 UI(快捷栏/背包/机器面板)、保留模式渲染(`TileMapLayer` + `MultiMesh`)——各自单独 brainstorm。
+P15 执行期确认(表现层后续第 1 项):纯表现层,**sim 零改动**(玩家八向行走 + 手挖 P5 已实现;golden 不变)。新增 `presentation/Faketorio.Presentation.Core/WalkInput.cs`(四方向键 → 八向 dir 纯函数,16 组合 xUnit)+ `game/PlayerInputController.cs`(`Node`,Follow 模式读 WASD → `MovePlayer`/`StopPlayer`,**仅方向变化 / 起停时发**,因 `MovePlayer` 是持久 sim 状态;按住 `E` → 对光标格 `MineStart`/`MineStop`)。`CameraController` 扩:Free 模式 WASD 平移相机(与中键拖拽并存)。`WorldView` 扩:玩家圆点按 `WalkDir` 画朝向刻度、手挖时光标格按 reach 着色。`game/project.godot` 加 InputMap `player_up/down/left/right/mine`(WASD+E)。模式仲裁靠 `CameraController.Mode` 单一裁决(Follow 归玩家、Free 归相机,无耦合);`Follow→Free` **不**停玩家(保留 walk 状态,留给后续锚定/带人移动模块)。整分支审查(opus)1 Important:Free 模式 reach 着色是虚假提示 → 改用 `sim.Player.Mining` 门控;+ 4 folded minor(`SubTilesPerTile` 常量、reach 比较与 sim `Isqrt` 边界对齐、缓存玩家原型、注释)。SDD 全 5 任务 clean,人工 F5 通过。裁定(preflight):`PlayerInputController` 内联 `WorldXform.ScreenToTile(mouse)`(同 `BuildController` 一行)而非抽 helper —— 读共享 transform,无逻辑漂移。本地 `--no-ff` merge。**遗留(F5 已确认的既有行为,非 bug):** 走进实体时整步拒绝(不滑墙),玩家仍 `Walking` 且画朝向刻度但零位移 —— 对新手像卡住,后续可加拒绝反馈。
+
+下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)+ 活跃列表换路(P13)+ 表现层 v1(P14)+ 传送带 lane 选边入料 + P15(玩家 WASD/相机跟随/手挖)已完成。剩余候选(无强依赖顺序,按价值/成本挑):① **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;单独 brainstorm);② 机器输入库存加过滤 + "销毁掉落物品"统一处理;③ `RotateEntity` 命令(仅在要让玩家事后转向时);④ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,从首次绿色 CI artifact 回填);⑤ **表现层后续**:视觉插值 lerp(要解决传送带物品跨 tick 身份匹配)、真美术(骨骼变换 vs 预渲染帧表)、完整命令 UI(快捷栏/背包/机器面板)、保留模式渲染(`TileMapLayer` + `MultiMesh`)——各自单独 brainstorm;⑥ **传送带带人移动(sim)**:传送带格可通行,玩家站上去按传送带方向被施加速度(顺向快、逆向慢),留一个"锚定模块"可覆盖此跟随的接口 —— 下一个 brainstorm。
 
 ## 0. 背景
 

@@ -33,6 +33,9 @@ public partial class WorldView : Node2D
     private CameraController _cam = null!;
     private BuildController _build = null!;
 
+    // 玩家原型的 ReachSubTiles 是不可变值,_Ready 里读一次缓存,别每帧字符串查字典。
+    private int _reachSubTiles;
+
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
     // _oreCache 的插入顺序,用于有界淘汰(每个 ck 一生只入队一次,见 FillPendingOreChunks 的 ContainsKey 门)。
     private readonly Queue<long> _oreCacheOrder = new();
@@ -47,6 +50,7 @@ public partial class WorldView : Node2D
         _host = GetNode<SimHost>("/root/SimHost");
         _cam = GetNode<CameraController>("../CameraController");
         _build = GetNode<BuildController>("../BuildController");
+        _reachSubTiles = _host.Sim.Prototypes.Get<PlayerPrototype>("player").ReachSubTiles;
     }
 
     public override void _Process(double delta)
@@ -175,14 +179,50 @@ public partial class WorldView : Node2D
             float pr = Mathf.Min(ppt * 0.3f, 20f);
             DrawCircle(p, pr, new Color("#e8e8e8"));
             DrawArc(p, pr, 0f, Mathf.Tau, 24, new Color(0.1f, 0.1f, 0.1f, 0.9f), 1.5f, true);
+            if (sim.Player.Walking)
+            {
+                // 八向单位向量(屏幕坐标,y 向下),与 sim Player.WalkDelta 一致。
+                (float fx, float fy) = sim.Player.WalkDir switch
+                {
+                    0 => (0f, -1f), 1 => (1f, -1f), 2 => (1f, 0f), 3 => (1f, 1f),
+                    4 => (0f, 1f), 5 => (-1f, 1f), 6 => (-1f, 0f), 7 => (-1f, -1f),
+                    _ => (0f, 0f),
+                };
+                var dirv = new Vector2(fx, fy);
+                if (dirv != Vector2.Zero)
+                    DrawLine(p, p + dirv.Normalized() * (pr * 1.6f), new Color("#ffd24a"), 2f);
+            }
         }
 
-        // 7. 光标格高亮
+        // 7. 光标格高亮 —— 手挖按住时按"够不够得着"着色。
         {
             var (hx, hy) = _build.HoverTile;
             var s = t.TileToScreen(hx, hy).ToGodot();
             var r = new Rect2(s, new Vector2(ppt, ppt));
-            DrawRect(r, _build.LastCommandRejected ? new Color(1, 0.3f, 0.3f) : new Color(1, 1, 1, 0.8f), false, 2f);
+
+            Color col;
+            if (_build.LastCommandRejected)
+            {
+                col = new Color(1, 0.3f, 0.3f);
+            }
+            else if (sim.Player.Mining)
+            {
+                // Free(地图)模式下 PlayerInputController 会压制手挖(进入 Free 时发 MineStop),
+                // 此时 Player.Mining 为 false,不再画 reach 着色这一假可供性。
+                const int St = WorldTransform.SubTilesPerTile;   // 256;半格 St/2 = 128
+                int reach = _reachSubTiles;
+                long ddx = sim.Player.X - ((long)hx * St + St / 2);
+                long ddy = sim.Player.Y - ((long)hy * St + St / 2);
+                // 与 Simulation.PlayerMine 的 Isqrt(ddx²+ddy²) > ReachSubTiles 拒绝边界完全对齐,
+                // 即接受当且仅当 ddx²+ddy² < (reach+1)²。
+                bool inReach = ddx * ddx + ddy * ddy < (long)(reach + 1) * (reach + 1);
+                col = inReach ? new Color(0.4f, 1f, 0.5f, 0.9f) : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+            }
+            else
+            {
+                col = new Color(1, 1, 1, 0.8f);
+            }
+            DrawRect(r, col, false, 2f);
         }
 
         // 8. 相机模式 HUD —— 左上角文字,M 键切换时肉眼可见。

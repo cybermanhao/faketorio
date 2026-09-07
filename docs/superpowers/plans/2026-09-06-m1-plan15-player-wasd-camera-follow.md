@@ -1,5 +1,7 @@
 # M1 Plan 15 — Player WASD Control + Camera Follows Moving Player Implementation Plan
 
+> **状态:✅ 已合并进 `main`(本地 `--no-ff`)。** SDD 全 5 任务 + 整分支审查完成;人工 F5 验收通过。整分支审查(opus)1 个 Important(Free 模式 reach 着色虚假提示 → 改用 `sim.Player.Mining` 门控)+ 4 个 folded minor,全部在修复 wave `c66a9f4` 处理,定向复审 clean。sim 零改动,golden 不变。跨 plan 进度看 `docs/superpowers/specs/2026-09-02-m1-remaining-roadmap.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire keyboard input in the Godot presentation layer so the player walks 8-way with WASD, the Follow camera tracks the moving player, Free (map) mode pans with WASD, and holding a key hand-mines the cursor tile — all via `Submit(Command)`, zero sim changes.
