@@ -36,6 +36,9 @@ public partial class WorldView : Node2D
     // 玩家原型的 ReachSubTiles 是不可变值,_Ready 里读一次缓存,别每帧字符串查字典。
     private int _reachSubTiles;
 
+    // Debug 覆盖层(传送带 BeltLine 分割线 + lane gap 分布)开关,debug_toggle 键翻转。
+    private bool _debugOn;
+
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
     // _oreCache 的插入顺序,用于有界淘汰(每个 ck 一生只入队一次,见 FillPendingOreChunks 的 ContainsKey 门)。
     private readonly Queue<long> _oreCacheOrder = new();
@@ -57,6 +60,15 @@ public partial class WorldView : Node2D
     {
         FillPendingOreChunks();
         QueueRedraw();
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (InputMap.HasAction("debug_toggle") && e.IsActionPressed("debug_toggle"))
+        {
+            _debugOn = !_debugOn;
+            GetViewport().SetInputAsHandled();
+        }
     }
 
     // 每帧摊几个待填 chunk 进缓存。这是唯一会调用 PeekChunk(可能触发一次 Generate)的地方。
@@ -230,7 +242,16 @@ public partial class WorldView : Node2D
             string label = _cam.Mode == CameraMode.Follow ? "FOLLOW" : "MAP (free)";
             DrawString(ThemeDB.FallbackFont, new Vector2(8, 20), label,
                        HorizontalAlignment.Left, -1f, 16, new Color(1, 1, 1, 0.9f));
+            if (_debugOn)
+                DrawString(ThemeDB.FallbackFont, new Vector2(8, 40), "DEBUG",
+                           HorizontalAlignment.Left, -1f, 16, new Color(1f, 0.6f, 0.2f, 0.9f));
         }
+
+        // 9. Debug 覆盖层(debug_toggle 键翻转)—— 传送带内部结构:BeltLine 出口/入口
+        // 分割横杠(按线循环上色,区分相邻但不同的逻辑线)+ 两条 lane 的 gap 分布
+        // (按 gap 下标循环上色,FFF-176 表示法一眼可见)。只读,不影响前面任何绘制。
+        if (_debugOn)
+            DrawDebugBeltStructure(t, sim);
     }
 
     // 沿 rot(0/1/2/3 = N/E/S/W)方向画 3 个 ">" 雪佛龙。center 是 belt 格中心(屏幕像素)。
@@ -269,22 +290,27 @@ public partial class WorldView : Node2D
         return false;
     }
 
+    // BeltLine 出口位置(世界亚格)+ 行进方向 + 行进方向右手法线(把 A/B 两条 lane 岔开)。
+    // 出口在 Tiles[0] 这一格朝 Direction 的那条边上。DrawLaneItems 和 debug 覆盖层共用,
+    // 保证两处对"沿带方向的距离"算的是同一套坐标。
+    private static (double exitX, double exitY, int dx, int dy, double nx, double ny) LineExitGeometry(BeltLine line)
+    {
+        var (dx, dy) = BeltNetwork.Delta(line.Direction);
+        var (ex, ey) = line.Tiles[0];
+        const double Sub = BeltLine.TileSubTiles;   // 256
+        double exitX = ex * Sub + Sub / 2 + dx * (Sub / 2);
+        double exitY = ey * Sub + Sub / 2 + dy * (Sub / 2);
+        return (exitX, exitY, dx, dy, -dy, dx);
+    }
+
     // BeltLane 的 PositionedItem.LeadingEdgeSubTiles 是"物品前沿离**出口**多少亚格"。
-    // 出口在 Tiles[0] 这一格朝 Direction 的那条边上;沿 -Direction 回退即可拿到世界亚格坐标。
     private void DrawLaneItems(WorldTransform t, BeltLine line, BeltLane lane, double laneOffsetTiles)
     {
         var items = lane.ToAbsolutePositions();
         if (items.Count == 0) return;
 
-        var (dx, dy) = BeltNetwork.Delta(line.Direction);
-        var (ex, ey) = line.Tiles[0];
-        const double Sub = BeltLine.TileSubTiles;   // 256
-
-        // 出口边中点(亚格)
-        double exitX = ex * Sub + Sub / 2 + dx * (Sub / 2);
-        double exitY = ey * Sub + Sub / 2 + dy * (Sub / 2);
-        // 行进方向的右手法线,用来把 A/B 两条 lane 岔开
-        double nx = -dy, ny = dx;
+        var (exitX, exitY, dx, dy, nx, ny) = LineExitGeometry(line);
+        const double Sub = BeltLine.TileSubTiles;
 
         float sz = (float)t.PixelsPerTile * 0.22f;
         var half = new Vector2(sz / 2, sz / 2);
@@ -299,6 +325,77 @@ public partial class WorldView : Node2D
             var box = new Rect2(s - half, new Vector2(sz, sz));
             DrawRect(box, RenderPalette.ForItem(it.ItemProtoId));                 // 亮色方块
             DrawRect(box, new Color(0.1f, 0.1f, 0.1f, 0.9f), false, 1f);          // 深色描边,motion 更明显
+        }
+    }
+
+    private static readonly Color[] DebugLineColors =
+    {
+        new("#38bdf8"), new("#a78bfa"), new("#34d399"),
+        new("#fbbf24"), new("#fb7185"), new("#94a3b8"),
+    };
+
+    private static readonly Color[] DebugGapColors =
+    {
+        new(0.2f, 0.85f, 1f, 0.85f), new(1f, 0.65f, 0.2f, 0.85f),
+        new(0.6f, 1f, 0.4f, 0.85f), new(1f, 0.4f, 0.75f, 0.85f),
+    };
+
+    // Debug:每条存活 BeltLine 画出口/入口分割横杠(按池下标循环上色,区分相邻但不同的
+    // 逻辑线)+ 两条 lane 各自的 gap 分布(按 gap 下标循环上色,沿带方向铺开)。
+    private void DrawDebugBeltStructure(WorldTransform t, Faketorio.Sim.Simulation sim)
+    {
+        float ppt = (float)t.PixelsPerTile;
+        for (int i = 0; i < sim.Belts.Capacity; i++)
+        {
+            if (!sim.Belts.IsAliveAtIndex(i)) continue;
+            var line = sim.Belts.GetAtIndex(i);
+            var (exitX, exitY, dx, dy, nx, ny) = LineExitGeometry(line);
+            var lineColor = DebugLineColors[i % DebugLineColors.Length];
+
+            // 出口(back=0)和入口(back=线长)各画一条垂直于带方向的横杠,标出这条逻辑线的边界。
+            DrawDebugBoundaryTick(t, exitX, exitY, nx, ny, ppt, lineColor);
+            double backLen = line.LengthSubTiles;
+            DrawDebugBoundaryTick(t, exitX - dx * backLen, exitY - dy * backLen, nx, ny, ppt, lineColor);
+
+            DrawDebugLaneGaps(t, line.LaneA, exitX, exitY, dx, dy, nx, ny, laneOffsetTiles: -0.4);
+            DrawDebugLaneGaps(t, line.LaneB, exitX, exitY, dx, dy, nx, ny, laneOffsetTiles: +0.4);
+        }
+    }
+
+    private void DrawDebugBoundaryTick(WorldTransform t, double worldX, double worldY, double nx, double ny, float ppt, Color color)
+    {
+        const double Sub = BeltLine.TileSubTiles;
+        double half = Sub * 0.5;
+        var a = t.WorldSubToScreen((long)(worldX + nx * half), (long)(worldY + ny * half)).ToGodot();
+        var b = t.WorldSubToScreen((long)(worldX - nx * half), (long)(worldY - ny * half)).ToGodot();
+        DrawLine(a, b, color, System.Math.Max(2f, ppt * 0.08f));
+    }
+
+    // 沿 lane 从出口往回铺 Gaps 列表,每段 gap 画一条彩色线(按下标循环上色),把 FFF-176
+    // gap 表示法的内部分布画出来。物品本身已经在 section 5 画过,这里跳过物品占的
+    // ItemWidthSubTiles,只画 gap(长度 0 的 gap 不画,画了也看不见)。
+    private void DrawDebugLaneGaps(WorldTransform t, BeltLane lane, double exitX, double exitY,
+                                    int dx, int dy, double nx, double ny, double laneOffsetTiles)
+    {
+        var gaps = lane.Gaps;
+        if (gaps.Count == 0) return;
+
+        const double Sub = BeltLine.TileSubTiles;
+        double pos = 0;
+        for (int i = 0; i < gaps.Count; i++)
+        {
+            int gapLen = gaps[i];
+            if (gapLen > 0)
+            {
+                var a = t.WorldSubToScreen(
+                    (long)(exitX - dx * pos + nx * laneOffsetTiles * Sub),
+                    (long)(exitY - dy * pos + ny * laneOffsetTiles * Sub)).ToGodot();
+                var b = t.WorldSubToScreen(
+                    (long)(exitX - dx * (pos + gapLen) + nx * laneOffsetTiles * Sub),
+                    (long)(exitY - dy * (pos + gapLen) + ny * laneOffsetTiles * Sub)).ToGodot();
+                DrawLine(a, b, DebugGapColors[i % DebugGapColors.Length], 3f);
+            }
+            pos += gapLen + BeltLane.ItemWidthSubTiles;
         }
     }
 
