@@ -1587,6 +1587,7 @@ public class SimulationTests
 
         // 没能走进 (3,0) 的占地:x 前沿始终 < 3*256
         Assert.True(sim.Player.X < 3 * St, $"expected blocked before x=768, got {sim.Player.X}");
+        Assert.True(sim.Player.X > x0, $"expected the player to have advanced from x0={x0}, got {sim.Player.X}");
     }
 
     [Fact]
@@ -1684,6 +1685,7 @@ public class SimulationTests
 
         // box: minY = 96, maxY = 3*256-96 = 672。玩家从 y=1024 往北,应停在 maxY(672) 前沿附近,不穿过。
         Assert.True(sim.Player.Y >= 3 * St - 96, $"expected blocked at/after box maxY=672, got {sim.Player.Y}");
+        Assert.True(sim.Player.Y < 4 * St, $"expected the player to have advanced from y=1024, got {sim.Player.Y}");
     }
 
     [Fact]
