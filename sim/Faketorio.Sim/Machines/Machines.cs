@@ -17,6 +17,9 @@ public sealed class Machines
     internal List<EntityId> ActiveIdsList => _order.IdsList;
     internal int StateCount => _states.Count;
 
+    // 60 tick(1 秒游戏时间)的兜底安全网周期——见设计 spec §4/§9。
+    public const int SafetyNetIntervalTicks = 60;
+
     public void RegisterMachine(EntityId id)
     {
         _states[id] = new MachineRuntimeState(-1, 0, false);

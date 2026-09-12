@@ -261,4 +261,10 @@ public class MachinesTests
         Assert.Empty(m.AwakeSnapshot());
         Assert.Empty(m.AsleepSnapshot());
     }
+
+    [Fact]
+    public void SafetyNetIntervalTicks_Is60()
+    {
+        Assert.Equal(60, Machines.SafetyNetIntervalTicks);
+    }
 }
