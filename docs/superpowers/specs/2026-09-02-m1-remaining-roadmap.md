@@ -6,7 +6,7 @@
 
 ## 进度快照(2026-09-06,更新)
 
-`main` 已含 P12(CI 回归基线)+ P13(活跃 id 列表,PR #1 已合)+ P14(表现层 v1)+ 传送带 lane 选边入料 + P15(玩家 WASD + 相机跟随 + 手挖)。`dotnet test sim/Faketorio.Sim.Tests` = **446 passing**;`dotnet test Faketorio.sln` = 446 + 26 `Presentation.Core.Tests`;`dotnet build -c Release` = 0 警告 0 错误。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
+`main` 已含 P12(CI 回归基线)+ P13(活跃 id 列表,PR #1 已合)+ P14(表现层 v1)+ 传送带 lane 选边入料 + P15(玩家 WASD + 相机跟随 + 手挖)+ debug 覆盖层(传送带 BeltLine 分割线 / gap 可视化)+ RotateEntity 命令。`dotnet test sim/Faketorio.Sim.Tests` = **454 passing**;`dotnet test Faketorio.sln` = 454 + 26 `Presentation.Core.Tests`;`dotnet build -c Release` = 0 警告 0 错误。P16(玩家碰撞盒 + 传送带带人移动)在未合并分支 `feat/m1-plan16-player-collision-belt-carry`(@ `38d4470`)—— SDD 全 3 任务 + 整分支审查 clean,`Ready to merge: Yes`,等用户回到电脑前 F5 后再合。SDD 执行时的逐任务账本在 `.superpowers/sdd/<plan>/progress.md`,收尾即删——**本表是唯一的跨 plan 进度看板**,plan 文档的 `- [ ]` 复选框不反映状态。
 
 | 子项目 | 状态 | 主线提交(合并后) |
 |---|---|---|
@@ -24,7 +24,7 @@
 | **P10** typed belt items + 电力采矿机(footprint 单目标找矿 + satisfaction 降速 + 输出 belt/箱子;并入了 typed belt items 前置项) | ✅ 已合并·已验证 | `4732384`..`0a1f8d1` |
 | **P11** 机械臂(belt lane ↔ inventory 抓/放,转速模型 + satisfaction 降速 + 两段摆臂,按子格位置抓/插传送带) | ✅ 已合并·已验证 | `947abd8`..`7a06760` |
 | 横切 · **typed belt items** | ✅ 已合并(并入 P10 Task 1) | `039748f` |
-| 横切 · RotateEntity 命令 | ⬜ 未立项(单独小 plan;P10/P11 已用"放置期 `Command.Rotation` 定死"绕过,只有想让玩家事后转向才需要) | — |
+| 横切 · RotateEntity 命令 | ✅ 已合并·已验证 | `761b2f3` |
 | 横切 · 实体休眠 / 活跃列表(§5.3 性能地基) | 🟡 **P13:换迭代源已合并**(4 容器 `ActiveIds` / `GeneratorIds`,8 个 tick 循环从全实体扫描改成遍历活跃 id 列表;`delta` 挪出机械臂空闲阶段 A)· **真休眠 / 唤醒待后续独立子项** | `3d91b48`..merge `c99d9fe` |
 | 横切 · 基准场景 + UPS/分配量报告进 CI(§5.5) | ✅ 已合并·已验证(P12) | `c42ef1d`..`66bce92` |
 | 横切 · "销毁掉落物品"统一处理(所有实体) | ⬜ 未立项 · 目前全代码库一致丢弃(传送带/箱子/P9 完成品/P10 pending/P11 手上物品);P11 最终审查:**无电机械臂仍会执行阶段 A 抓取**,物品能被死机械臂从传送带上拿走并卡在手里(确定、有界、来电即恢复,但与 Factorio 不符),和"销毁掉落"一起考虑 | — |
@@ -43,7 +43,11 @@ P14 执行期确认:表现层第一个子项落地 —— `presentation/Faketori
 
 P15 执行期确认(表现层后续第 1 项):纯表现层,**sim 零改动**(玩家八向行走 + 手挖 P5 已实现;golden 不变)。新增 `presentation/Faketorio.Presentation.Core/WalkInput.cs`(四方向键 → 八向 dir 纯函数,16 组合 xUnit)+ `game/PlayerInputController.cs`(`Node`,Follow 模式读 WASD → `MovePlayer`/`StopPlayer`,**仅方向变化 / 起停时发**,因 `MovePlayer` 是持久 sim 状态;按住 `E` → 对光标格 `MineStart`/`MineStop`)。`CameraController` 扩:Free 模式 WASD 平移相机(与中键拖拽并存)。`WorldView` 扩:玩家圆点按 `WalkDir` 画朝向刻度、手挖时光标格按 reach 着色。`game/project.godot` 加 InputMap `player_up/down/left/right/mine`(WASD+E)。模式仲裁靠 `CameraController.Mode` 单一裁决(Follow 归玩家、Free 归相机,无耦合);`Follow→Free` **不**停玩家(保留 walk 状态,留给后续锚定/带人移动模块)。整分支审查(opus)1 Important:Free 模式 reach 着色是虚假提示 → 改用 `sim.Player.Mining` 门控;+ 4 folded minor(`SubTilesPerTile` 常量、reach 比较与 sim `Isqrt` 边界对齐、缓存玩家原型、注释)。SDD 全 5 任务 clean,人工 F5 通过。裁定(preflight):`PlayerInputController` 内联 `WorldXform.ScreenToTile(mouse)`(同 `BuildController` 一行)而非抽 helper —— 读共享 transform,无逻辑漂移。本地 `--no-ff` merge。**遗留(F5 已确认的既有行为,非 bug):** 走进实体时整步拒绝(不滑墙),玩家仍 `Walking` 且画朝向刻度但零位移 —— 对新手像卡住,后续可加拒绝反馈。
 
-下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)+ 活跃列表换路(P13)+ 表现层 v1(P14)+ 传送带 lane 选边入料 + P15(玩家 WASD/相机跟随/手挖)已完成。剩余候选(无强依赖顺序,按价值/成本挑):① **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;单独 brainstorm);② 机器输入库存加过滤 + "销毁掉落物品"统一处理;③ `RotateEntity` 命令(仅在要让玩家事后转向时);④ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,从首次绿色 CI artifact 回填);⑤ **表现层后续**:视觉插值 lerp(要解决传送带物品跨 tick 身份匹配)、真美术(骨骼变换 vs 预渲染帧表)、完整命令 UI(快捷栏/背包/机器面板)、保留模式渲染(`TileMapLayer` + `MultiMesh`)——各自单独 brainstorm;⑥ **传送带带人移动(sim)**:传送带格可通行,玩家站上去按传送带方向被施加速度(顺向快、逆向慢),留一个"锚定模块"可覆盖此跟随的接口 —— 下一个 brainstorm。
+Debug 覆盖层(横切,bounded,零 sim 改动):`game/WorldView.cs` 加 `debug_toggle`(反引号)开关的只读绘制层。每条存活 `BeltLine` 在出口 / 入口画分割横杠(按池下标循环上色,区分相邻但不同的逻辑线);`LaneA`/`LaneB` 的 `Gaps` 列表沿带方向铺成彩色线段(按 gap 下标循环上色),把 FFF-176 gap 表示法的内部分布画出来。`DrawLaneItems` 的出口几何抽成 `LineExitGeometry` 给两处共用。碰撞盒可视化 / 寻路线留后续(前者依赖 P16 未合并分支的 `CollisionInsetSubTiles`;后者是纯架构预留 —— "一个开关位 + 每类调试图层一个私有方法",以后插新方法即可)。commit `9167012`。
+
+RotateEntity 命令(横切):玩家事后转向已放置实体。`CommandType.RotateEntity`,reach 检查同 `TransferToEntity`,非方形占地(large-chest 2x3)拒绝,同方向 no-op。传送带转向 = `RemoveBelt` → 改 `Rotation` → `AddBelt`,零新 belt 代码,全复用既有拆分/合并/丢弃逻辑。其它实体直接改 `EntityData.Rotation` 立即生效。**设计裁定**(用户在 brainstorm 中当场指出隐患):机械臂/采矿机各有一个"进行中"危险窗口(机械臂手里有物品、采矿机挖完待排出)——此时立即转向会让已经开始的动作瞬间换目的地(相当于免费传送)。改成 `Inserters`/`MiningDrills` 各加 `PendingRotation` 字段(排队,-1=无),在各自 tick 循环的安全点(手空 / flush 后)消费应用,不碰两个 tick 方法本体。**实现期抓到一个真 bug**:`MiningDrills.ResetAfterFlush` 原来的 5 参构造会把 `PendingRotation` 弹回默认 -1——排队值在安全窗口打开前一步就被自己冲掉,写完整的 8 个 xUnit(含跨 tick 的"手上有东西时转向 → 按旧方向落地 → 下一轮才生效"这类用例)才抓出来,改成读旧值带过去。`PendingRotation` 进两者的 `WriteState`(各 +1 byte)→ golden 主动重基线(`baselineNsPerTick` 仍 0)。commit `761b2f3`。
+
+下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12)+ 活跃列表换路(P13)+ 表现层 v1(P14)+ 传送带 lane 选边入料 + P15(玩家 WASD/相机跟随/手挖)+ debug 覆盖层 + `RotateEntity` 已完成。P16(玩家碰撞盒 + 传送带带人移动)代码/审查已完成,在未合并分支上等人工 F5。剩余候选(无强依赖顺序,按价值/成本挑):① **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;单独 brainstorm);② 机器输入库存加过滤 + "销毁掉落物品"统一处理(P11 review 还挂了一个关联 bug:无电机械臂仍执行阶段 A 抓取,物品会卡在死机械臂手里,建议和掉落策略一起定);③ `bench/golden.json` 的 `baselineNsPerTick` 校准(P12 遗留的一次性人工步骤,从首次绿色 CI artifact 回填);④ **表现层后续**:视觉插值 lerp(要解决传送带物品跨 tick 身份匹配)、真美术(骨骼变换 vs 预渲染帧表)、完整命令 UI(快捷栏/背包/机器面板)、保留模式渲染(`TileMapLayer` + `MultiMesh`)、碰撞盒 debug 可视化(等 P16 合并)——各自单独 brainstorm。
 
 ## 0. 背景
 
