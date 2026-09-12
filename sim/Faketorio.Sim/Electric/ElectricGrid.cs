@@ -13,6 +13,18 @@ public sealed class ElectricGrid
     private bool _topologyDirty = true;
     private List<Network> _networks = new();
 
+    // 空间索引:FindNetworkAt 曾经是对 _networks 里全部杆线性扫描(O(P) 每次调用,
+    // 每 tick 每个耗电/供电实体都调一次 -> O(scale) 调用 x O(scale) 扫描 = O(scale^2))。
+    // 按坐标分桶(BucketSize 格一格),桶内候选列表严格保持"网络序 + 网络内杆序"这个
+    // 原本决定"重叠时谁赢"的优先级顺序不变——一根杆的供电方框跨几个桶就插几个桶,
+    // 查询只看命中的那一个桶,结果与旧的全量线性扫描逐字节一致,只是快很多。
+    // 只在 EnsureTopology()(拓扑变化才重建)里重建,不在每 tick 的查询路径上。
+    private const int BucketSize = 8;
+    private Dictionary<long, List<(NetworkId Net, EntityId Pole)>> _bucketIndex = new();
+
+    private static long BucketKey(int bx, int by) => ((long)bx << 32) | (uint)by;
+    private static int FloorDiv(int a, int b) => a >= 0 ? a / b : -((-a + b - 1) / b);
+
     private readonly Dictionary<NetworkId, Registration> _registrations = new();
     private readonly Dictionary<EntityId, long> _allocatedSupply = new();
     private readonly Dictionary<EntityId, Q16> _satisfaction = new();
@@ -61,17 +73,19 @@ public sealed class ElectricGrid
     }
 
     // 方形(Chebyshev)供电覆盖区。网络索引序 + 网络内 EntityId.Index 序,
-    // 重叠覆盖区第一个命中的赢——确定、可复现。
+    // 重叠覆盖区第一个命中的赢——确定、可复现。只看查询点所在的那一个桶,
+    // 桶内候选已经是原始优先级顺序,不需要再排序。
     public NetworkId FindNetworkAt(int x, int y)
     {
         EnsureTopology();
-        for (int ni = 0; ni < _networks.Count; ni++)
-            foreach (var poleId in _networks[ni].Poles)
-            {
-                var p = _poles[poleId];
-                if (Math.Max(Math.Abs(x - p.X), Math.Abs(y - p.Y)) <= p.SupplyAreaDistanceTiles)
-                    return new NetworkId(ni);
-            }
+        if (!_bucketIndex.TryGetValue(BucketKey(FloorDiv(x, BucketSize), FloorDiv(y, BucketSize)), out var candidates))
+            return NetworkId.Invalid;
+        foreach (var (net, poleId) in candidates)
+        {
+            var p = _poles[poleId];
+            if (Math.Max(Math.Abs(x - p.X), Math.Abs(y - p.Y)) <= p.SupplyAreaDistanceTiles)
+                return net;
+        }
         return NetworkId.Invalid;
     }
 
@@ -121,6 +135,28 @@ public sealed class ElectricGrid
             networks.Add(new Network { Poles = list });
         networks.Sort((x, y) => x.Poles[0].Index.CompareTo(y.Poles[0].Index));
         _networks = networks;
+
+        var bucketIndex = new Dictionary<long, List<(NetworkId Net, EntityId Pole)>>();
+        for (int ni = 0; ni < networks.Count; ni++)
+        {
+            var net = new NetworkId(ni);
+            foreach (var poleId in networks[ni].Poles)   // 网络内已是 Index 升序,插入顺序 = 原优先级顺序
+            {
+                var p = _poles[poleId];
+                int r = p.SupplyAreaDistanceTiles;
+                int bxMin = FloorDiv(p.X - r, BucketSize), bxMax = FloorDiv(p.X + r, BucketSize);
+                int byMin = FloorDiv(p.Y - r, BucketSize), byMax = FloorDiv(p.Y + r, BucketSize);
+                for (int bx = bxMin; bx <= bxMax; bx++)
+                    for (int by = byMin; by <= byMax; by++)
+                    {
+                        var key = BucketKey(bx, by);
+                        if (!bucketIndex.TryGetValue(key, out var list))
+                            bucketIndex[key] = list = new List<(NetworkId, EntityId)>();
+                        list.Add((net, poleId));
+                    }
+            }
+        }
+        _bucketIndex = bucketIndex;
     }
 
     // 登记本 tick 的供给/需求。查不到网络(没接上电线杆)->直接记 0/Zero,不进结算。

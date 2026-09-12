@@ -87,6 +87,30 @@ public class ElectricGridTests
     }
 
     [Fact]
+    public void SupplyAreaStraddlesBucketBoundary_StillFound()
+    {
+        // 空间索引按 8 格分桶。杆在 (10,0),供电半径 5 -> 覆盖 x=5..15,跨过桶边界 x=8。
+        // 查询点 (6,0) 落在杆自己所在桶(bx=1)之外的另一个桶(bx=0)里,
+        // 必须依然命中——验证一根杆的覆盖方框跨桶时,插入逻辑覆盖了它接触到的每个桶。
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 10, 0, maximumWireDistanceTiles: 7, supplyAreaDistanceTiles: 5);
+
+        Assert.True(grid.FindNetworkAt(6, 0).IsValid);
+        Assert.False(grid.FindNetworkAt(4, 0).IsValid);   // Chebyshev 6 > 5,出范围
+    }
+
+    [Fact]
+    public void QueryPointInEmptyBucket_ReturnsInvalid()
+    {
+        // 查询点所在的桶里完全没有任何杆插入过 -> 索引里没有这个桶的条目,
+        // 必须走"桶不存在"分支返回 Invalid,而不是抛异常或误命中。
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 7, supplyAreaDistanceTiles: 2);
+
+        Assert.False(grid.FindNetworkAt(1000, 1000).IsValid);
+    }
+
+    [Fact]
     public void UnregisterPole_RemovesItsCoverage()
     {
         var grid = new ElectricGrid();
