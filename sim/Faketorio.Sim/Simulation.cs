@@ -376,8 +376,10 @@ public sealed class Simulation
                     return;
                 }
                 var eid = World.GetEntityAt(command.X, command.Y);
-                int targetRole = eid.IsValid && Prototypes.TryGetById(Entities.Get(eid).ProtoId, out var targetProto)
-                    && targetProto is CraftingMachinePrototype ? 1 : 0;
+                PrototypeBase? targetProto = null;
+                bool targetIsMachine = eid.IsValid && Prototypes.TryGetById(Entities.Get(eid).ProtoId, out targetProto)
+                    && targetProto is CraftingMachinePrototype;
+                int targetRole = targetIsMachine ? 1 : 0;
                 var targetInvId = eid.IsValid ? Inventories.GetInventoryId(eid, targetRole) : InventoryId.Invalid;
                 if (!targetInvId.IsValid)
                 {
@@ -391,7 +393,11 @@ public sealed class Simulation
                     return;
                 }
                 var targetInv = Inventories.Get(targetInvId);
-                int inserted = targetInv.Insert(command.ProtoId, amount, itemProto.StackSize);
+                // 机器输入过滤(role 1):不是当前配方(装配机)/ 不是任一 smelting 配方原料
+                // (熔炉)就当"塞不进"处理,同库存满时一样静默 0,不算命令被拒。
+                bool blockedByFilter = targetIsMachine
+                    && !CanAcceptMachineInput(eid, (CraftingMachinePrototype)targetProto!, command.ProtoId);
+                int inserted = blockedByFilter ? 0 : targetInv.Insert(command.ProtoId, amount, itemProto.StackSize);
                 Player.Inventory.Remove(command.ProtoId, inserted);
                 return;
             }
@@ -583,6 +589,34 @@ public sealed class Simulation
             long delivered = Math.Min(actual, buf);
             ElectricGrid.SetFuelBufferJ(id, buf - delivered);
         }
+    }
+
+    // 机器 role-1 输入过滤:这个物品现在能不能塞进这台机器的输入。
+    // 装配机:配方是玩家 SetRecipe 持久设置的(不自动清)——没配方(-1)一律拒收,
+    // 设了配方只收该配方的 ResolvedIngredients。
+    // 熔炉:配方是每轮从输入内容现场倒推出来的(MachineTickPreSettle 第 2 步,
+    // clearRecipe:true),"当前配方"在第一炉投料前根本不存在——所以不能按"当前
+    // 配方"过滤,否则会把自己第一次要用来倒推配方的原料挡在外面。改成:只要是
+    // 任一 proto.Category(如 "smelting")配方的原料就收,不看是不是当前配方。
+    private bool CanAcceptMachineInput(EntityId machineId, CraftingMachinePrototype proto, int itemProtoId)
+    {
+        if (proto is FurnacePrototype)
+        {
+            for (int rid = 0; rid < Prototypes.Count; rid++)
+            {
+                if (Prototypes.GetById(rid) is not RecipePrototype recipe || recipe.Category != proto.Category) continue;
+                foreach (var ing in recipe.ResolvedIngredients)
+                    if (ing.ItemProtoId == itemProtoId) return true;
+            }
+            return false;
+        }
+
+        int recipeId = Machines.GetCurrentRecipe(machineId);
+        if (recipeId == -1) return false;   // 没配方:还不知道要造什么,一律拒收
+        var currentRecipe = (RecipePrototype)Prototypes.GetById(recipeId);
+        foreach (var ing in currentRecipe.ResolvedIngredients)
+            if (ing.ItemProtoId == itemProtoId) return true;
+        return false;
     }
 
     // 加工:配方选定 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟——全部机器
@@ -857,8 +891,11 @@ public sealed class Simulation
         int held = Inserters.GetHeldItemProtoId(id);
         long progress = Inserters.GetSwingProgress(id);
 
-        // 阶段 A:空手停在抓取角 —— 尝试抓
-        if (held == 0 && progress == 0)
+        // 阶段 A:空手停在抓取角 —— 尝试抓。没电(satisfaction==0)不抓:抓了也摆不动
+        // (下面 delta 按 satisfaction 缩放,==0 时摆臂永远推不动),物品会卡死在手里
+        // 直到来电,不符合 Factorio 行为——干脆不让它先抓。partial power(欠载但非 0)
+        // 仍可以抓,只是摆得慢,同现有降速语义一致。
+        if (held == 0 && progress == 0 && ElectricGrid.GetSatisfaction(id).Raw > 0)
         {
             var pickLineId = Belts.GetLineAt(pickX, pickY);
             if (pickLineId.IsValid)
@@ -917,11 +954,15 @@ public sealed class Simulation
             else
             {
                 var dropEntity = World.GetEntityAt(dropX, dropY);
-                int role = dropEntity.IsValid
-                    && Prototypes.TryGetById(Entities.Get(dropEntity).ProtoId, out var dp)
-                    && dp is CraftingMachinePrototype ? 1 : 0;
+                PrototypeBase? dp = null;
+                bool dropIsMachine = dropEntity.IsValid
+                    && Prototypes.TryGetById(Entities.Get(dropEntity).ProtoId, out dp)
+                    && dp is CraftingMachinePrototype;
+                int role = dropIsMachine ? 1 : 0;
                 var invId = dropEntity.IsValid ? Inventories.GetInventoryId(dropEntity, role) : InventoryId.Invalid;
-                if (invId.IsValid)
+                // 机器输入过滤(role 1):不匹配就跟"库存满"一样留手,下 tick 再试——
+                // 不是新的拒绝路径,只是多一种"这次放不下"的原因。
+                if (invId.IsValid && (!dropIsMachine || CanAcceptMachineInput(dropEntity, (CraftingMachinePrototype)dp!, held)))
                 {
                     int stack = ((ItemPrototype)Prototypes.GetById(held)).StackSize;
                     released = Inventories.Get(invId).Insert(held, 1, stack) > 0;

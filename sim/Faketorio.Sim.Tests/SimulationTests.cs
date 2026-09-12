@@ -1803,4 +1803,150 @@ public class SimulationTests
         Assert.Equal(1, chestA.CountOf(iron));
         Assert.Equal(chestBBefore - 1, chestB.CountOf(iron));
     }
+
+    // --- 机器输入过滤(role 1) ------------------------------------------
+
+    [Fact]
+    public void TransferToEntity_AssemblerWithoutRecipe_InsertsNothing()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 2));
+        sim.Step();
+
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        sim.Player.Inventory.Insert(plateId, 2, plateStack);
+        // player.json 的开局物资包本来就带 8 个 iron-plate,不能假设从 0 开始。
+        int playerBefore = sim.Player.Inventory.CountOf(plateId);
+
+        sim.Submit(TransferTo(0, 2, plateId, 2));
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        Assert.Equal(0, inputInv.CountOf(plateId));                       // 没配方,不知道要收什么,一律拒收
+        Assert.Equal(playerBefore, sim.Player.Inventory.CountOf(plateId)); // 玩家背包也没被扣
+        Assert.Equal(0, sim.RejectedCommandCount);                        // 不算命令被拒,同"库存满"语义
+    }
+
+    [Fact]
+    public void TransferToEntity_AssemblerWithRecipe_OnlyAcceptsCurrentIngredient()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 2));
+        sim.Step();
+
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int oreStack = sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize;
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;   // 原料:iron-plate
+
+        sim.Submit(SetRecipe(0, 2, gearRecipeId));
+        sim.Step();
+
+        sim.Player.Inventory.Insert(plateId, 2, plateStack);
+        sim.Player.Inventory.Insert(oreId, 2, oreStack);
+        sim.Submit(TransferTo(0, 2, oreId, 2));    // 铁矿不是这个配方的原料
+        sim.Submit(TransferTo(0, 2, plateId, 2));  // 铁板是
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        Assert.Equal(0, inputInv.CountOf(oreId));
+        Assert.Equal(2, inputInv.CountOf(plateId));
+    }
+
+    [Fact]
+    public void TransferToEntity_Furnace_AcceptsSmeltingIngredient_EvenBeforeRecipeInferred()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        Assert.Equal(-1, sim.Machines.GetCurrentRecipe(furnaceId));   // 还没倒推出配方(第一炉都没投)
+
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int oreStack = sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize;
+        sim.Player.Inventory.Insert(oreId, 2, oreStack);
+        sim.Submit(TransferTo(0, 2, oreId, 2));
+        sim.Step();
+
+        // 收了——过滤看的是"是不是某个 smelting 配方的原料",不是"当前配方"(还不存在)。
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        Assert.Equal(2, inputInv.CountOf(oreId));
+    }
+
+    [Fact]
+    public void TransferToEntity_Furnace_RejectsNonSmeltingItem()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        int gearId = sim.Prototypes.Get<ItemPrototype>("iron-gear-wheel").Id;
+        int gearStack = sim.Prototypes.Get<ItemPrototype>("iron-gear-wheel").StackSize;
+        sim.Player.Inventory.Insert(gearId, 2, gearStack);
+        sim.Submit(TransferTo(0, 2, gearId, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        Assert.Equal(0, inputInv.CountOf(gearId));
+        Assert.Equal(2, sim.Player.Inventory.CountOf(gearId));
+    }
+
+    [Fact]
+    public void Inserter_DropIntoMachineInput_BlockedByFilter_HoldsItemIndefinitely()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));   // 东
+        sim.Submit(PlaceAssembler(sim, 2, 2));                // 没设配方,role-1 一律拒收
+        sim.Step();
+
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        chestInv.Insert(plateId, 1, plateStack);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+        var asmId = sim.World.GetEntityAt(2, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+
+        for (int t = 0; t < 300; t++) sim.Step();   // 远超一次摆臂周期(~63 tick),够它反复试放
+
+        Assert.NotEqual(0, sim.Inserters.GetHeldItemProtoId(insId));   // 一直卡在手里,没被"塞"进去
+        Assert.Equal(0, inputInv.CountOf(plateId));
+    }
+
+    [Fact]
+    public void Inserter_NoPower_DoesNotGrab_ThenGrabsOncePowered()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var chestA = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        chestA.Insert(iron, 1, ironStack);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+
+        // 没接电网(satisfaction 恒 0)——阶段 A 不该抓,哪怕物品明明够得着。
+        for (int t = 0; t < 100; t++) sim.Step();
+        Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));
+        Assert.Equal(1, chestA.CountOf(iron));   // 原封不动待在源箱子里
+
+        // 接上电网(pole(0,0)+gen(2,0),跟已有布局不冲突)——来电后正常抓。
+        PlacePoweredInserterInfra(sim);
+        int tick = 0;
+        while (sim.Inserters.GetHeldItemProtoId(insId) == 0 && tick < 100) { sim.Step(); tick++; }
+        Assert.NotEqual(0, sim.Inserters.GetHeldItemProtoId(insId));
+    }
 }
