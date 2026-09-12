@@ -40,4 +40,8 @@ internal sealed class OrderedEntityIdList
         int lo = LowerBound(id.Index);
         if (lo < _ids.Count && _ids[lo] == id) _ids.RemoveAt(lo);
     }
+
+    // 循环体内可能修改 _ids 时用这个拍快照,避免 foreach 活列表触发
+    // InvalidOperationException(集合已修改)。
+    public EntityId[] ToArray() => _ids.ToArray();
 }
