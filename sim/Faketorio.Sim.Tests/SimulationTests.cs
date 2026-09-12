@@ -1567,4 +1567,240 @@ public class SimulationTests
         Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));   // state gone, held item silently discarded
         Assert.False(sim.World.GetEntityAt(1, 2).IsValid);
     }
+
+    // --- RotateEntity ---------------------------------------------------
+
+    private static Command RotateEntity(int x, int y, byte rotation) => new()
+    {
+        Type = CommandType.RotateEntity, X = x, Y = y, Rotation = rotation,
+    };
+
+    [Fact]
+    public void RotateEntity_OutOfReach_Rejected()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 20, 0));   // 玩家在 (0,0),ReachSubTiles 1536 = 6 tile,远超够不着
+        sim.Step();
+        int before = sim.RejectedCommandCount;
+
+        sim.Submit(RotateEntity(20, 0, 1));
+        sim.Step();
+
+        Assert.Equal(before + 1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void RotateEntity_NonSquareFootprint_Rejected()
+    {
+        var sim = NewSim();
+        sim.Submit(new Command
+        {
+            Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<ContainerPrototype>("large-chest").Id,   // 2x3,非方形
+            X = 0, Y = 0,
+        });
+        sim.Step();
+        int before = sim.RejectedCommandCount;
+
+        sim.Submit(RotateEntity(0, 0, 1));
+        sim.Step();
+
+        Assert.Equal(before + 1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void RotateEntity_SameRotation_IsNoOpAndNotRejected()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 0));
+        sim.Step();
+        int before = sim.RejectedCommandCount;
+
+        sim.Submit(RotateEntity(0, 0, 0));   // 箱子放置时就是 rotation 0
+        sim.Step();
+
+        Assert.Equal(before, sim.RejectedCommandCount);   // 没被拒绝
+    }
+
+    [Fact]
+    public void RotateEntity_Belt_ChangesDirectionAndDiscardsExistingItems()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 0, 0, E));   // 东
+        sim.Step();
+
+        // 塞一个物品到两条 lane 上,验证转向后被丢弃(同 RemoveBelt 既有约定)。
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(0, 0));
+        int ore = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        line.LaneA.TryInsertAtBack(ore);
+        line.LaneB.TryInsertAtBack(ore);
+
+        sim.Submit(RotateEntity(0, 0, 2));   // 南
+        sim.Step();
+
+        var newLineId = sim.Belts.GetLineAt(0, 0);
+        Assert.True(newLineId.IsValid);
+        var newLine = sim.Belts.GetLine(newLineId);
+        Assert.Equal(2, newLine.Direction);
+        Assert.Equal(0, newLine.LaneA.Count);
+        Assert.Equal(0, newLine.LaneB.Count);
+    }
+
+    [Fact]
+    public void RotateEntity_MiningDrill_Idle_AppliesImmediately()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东,输出到 (2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));                // 旧输出格
+        sim.Submit(PlaceChest(sim, 0, 4));                // 新输出格(朝南 rotation=2 时:(0,2)+(0,2)*2=(0,4))
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 4)));
+
+        // 还没挖完(!IsCompleted)时转向 —— 不在危险窗口,立即生效。
+        Assert.False(sim.MiningDrills.IsCompleted(drillId));
+        sim.Submit(RotateEntity(0, 2, 2));   // 南
+        sim.Step();
+
+        int tick = 0;
+        while (oldOutInv.TotalItems() == 0 && newOutInv.TotalItems() == 0 && tick < 400)
+        {
+            sim.Step();
+            tick++;
+        }
+
+        Assert.Equal(0, oldOutInv.TotalItems());     // 没有排到旧方向
+        Assert.True(newOutInv.TotalItems() > 0);     // 排到了新方向,说明立即生效
+    }
+
+    [Fact]
+    public void RotateEntity_MiningDrill_WhileCompleted_DefersUntilFlushed()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // 这个用例要跑完整整两轮挖矿周期 + 若干轮询,PlacePoweredDrillInfra 自带的 5 块煤
+        // (~222 tick 满功率预算)撑不住,直接给发电机灌满,把燃料排除在变量之外。
+        sim.ElectricGrid.SetFuelBufferJ(sim.World.GetEntityAt(2, 0), 1_000_000_000L);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东,输出到 (2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));                // 旧输出格
+        sim.Submit(PlaceChest(sim, 0, 4));                // 新输出格(朝南)
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        Assert.True(sim.World.GetEntityAt(2, 2).IsValid, "old output chest missing");
+        Assert.True(sim.World.GetEntityAt(0, 4).IsValid, "new output chest missing");
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId));
+        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 4)));
+
+        // 堵住旧输出格,逼它停在"挖完待排出"的危险窗口里。
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        oldOutInv.Insert(coal, oldOutInv.SlotCount * coalStack, coalStack);
+
+        int tick = 0;
+        while (!sim.MiningDrills.IsCompleted(drillId) && tick < 400) { sim.Step(); tick++; }
+        Assert.True(sim.MiningDrills.IsCompleted(drillId), $"never completed after {tick} ticks; progress={sim.MiningDrills.GetProgress(drillId)}, targetX={sim.MiningDrills.GetTargetX(drillId)}");
+
+        // 挖完待排出时发转向:排队,不立即改朝向(排出格还没落地)。
+        sim.Submit(RotateEntity(0, 2, 2));   // 南
+        sim.Step();
+        Assert.True(sim.MiningDrills.IsCompleted(drillId));   // 仍卡在旧朝向的危险窗口
+
+        // 腾出旧输出格 —— flush 必须走旧朝向落进旧箱子,不能瞬移到新朝向。
+        // (旧箱子腾位后仍剩不少煤,TotalItems() 不会归 0,用 IsCompleted 归 false 判断 flush 是否发生。)
+        int totalBeforeFlush = oldOutInv.TotalItems();
+        oldOutInv.Remove(coal, coalStack);
+        tick = 0;
+        while (sim.MiningDrills.IsCompleted(drillId) && tick < 50) { sim.Step(); tick++; }
+        Assert.False(sim.MiningDrills.IsCompleted(drillId));               // flush 成功
+        Assert.True(oldOutInv.TotalItems() > totalBeforeFlush - coalStack); // 挖出的那件确实进了旧箱子
+        Assert.Equal(0, newOutInv.TotalItems());
+
+        // flush 之后排队的转向生效,后续产出走新方向。
+        int oldAfterFirstFlush = oldOutInv.TotalItems();
+        tick = 0;
+        while (newOutInv.TotalItems() == 0 && oldOutInv.TotalItems() == oldAfterFirstFlush && tick < 400) { sim.Step(); tick++; }
+        Assert.True(newOutInv.TotalItems() > 0,
+            $"tick={tick} old={oldOutInv.TotalItems()}(was {oldAfterFirstFlush}) targetX={sim.MiningDrills.GetTargetX(drillId)} " +
+            $"targetY={sim.MiningDrills.GetTargetY(drillId)} completed={sim.MiningDrills.IsCompleted(drillId)} progress={sim.MiningDrills.GetProgress(drillId)}");
+    }
+
+    [Fact]
+    public void RotateEntity_Inserter_Idle_AppliesImmediately_ReversesFlow()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));   // 东:behind=(0,2) ahead=(2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var chestA = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));
+        var chestB = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
+
+        var insId = sim.World.GetEntityAt(1, 2);
+        Assert.Equal(0, sim.Inserters.GetHeldItemProtoId(insId));   // 空闲,不在危险窗口
+
+        // 转向西:behind/ahead 互换。
+        sim.Submit(RotateEntity(1, 2, 3));
+        sim.Step();
+
+        // 现在把料放进 chestB(新 behind),验证搬运方向真的翻了。
+        chestB.Insert(iron, 1, ironStack);
+        int tick = 0;
+        while (chestA.CountOf(iron) == 0 && tick < 280) { sim.Step(); tick++; }
+
+        Assert.Equal(1, chestA.CountOf(iron));
+        Assert.Equal(0, chestB.CountOf(iron));
+    }
+
+    [Fact]
+    public void RotateEntity_Inserter_WhileHolding_DefersUntilHandEmpty_ThenAppliesForNextCycle()
+    {
+        var sim = NewSim();
+        PlacePoweredInserterInfra(sim);
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));   // 东:behind=(0,2) ahead=(2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        int iron = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        var chestA = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 2)));   // 旧 behind / 新 ahead
+        var chestB = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));   // 旧 ahead / 新 behind
+        chestA.Insert(iron, 1, ironStack);
+
+        var insId = sim.World.GetEntityAt(1, 2);
+
+        // 跑到刚抓到手(held != 0)就停 —— 进入危险窗口。
+        int tick = 0;
+        while (sim.Inserters.GetHeldItemProtoId(insId) == 0 && tick < 100) { sim.Step(); tick++; }
+        Assert.NotEqual(0, sim.Inserters.GetHeldItemProtoId(insId));
+
+        // 手上有东西时发转向:排队,不立即生效。
+        sim.Submit(RotateEntity(1, 2, 3));   // 西
+        sim.Step();
+
+        // 继续跑到放下(held 归 0)——这一下必须用旧朝向落进 chestB,没有瞬移。
+        tick = 0;
+        while (sim.Inserters.GetHeldItemProtoId(insId) != 0 && tick < 200) { sim.Step(); tick++; }
+        Assert.Equal(1, chestB.CountOf(iron));
+        Assert.Equal(0, chestA.CountOf(iron));
+
+        // 排队的转向在手空之后应用;给 chestB(新 behind)放料,验证下一轮方向真的翻了。
+        // chestB 此时已有上一轮反向落下的 1 个,这里再插 1 个 -> 2 个;下面只跑到 chestA
+        // 拿到第一个就停,所以 chestB 该剩 1 个(被搬走 1 个),不是 0。
+        chestB.Insert(iron, 1, ironStack);
+        int chestBBefore = chestB.CountOf(iron);
+        tick = 0;
+        while (chestA.CountOf(iron) == 0 && tick < 400) { sim.Step(); tick++; }
+        Assert.Equal(1, chestA.CountOf(iron));
+        Assert.Equal(chestBBefore - 1, chestB.CountOf(iron));
+    }
 }

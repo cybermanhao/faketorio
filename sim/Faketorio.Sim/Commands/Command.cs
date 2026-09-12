@@ -12,6 +12,7 @@ public enum CommandType : byte
     TransferToEntity = 8,
     TransferFromEntity = 9,
     SetRecipe = 10,
+    RotateEntity = 11,
 }
 
 public struct Command

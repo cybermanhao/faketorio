@@ -73,10 +73,11 @@ public class BenchScenarioTests
         Assert.Equal(GOLDEN_TICK_800, h1[799]);
     }
 
-    // re-baselined when 传送带 lane 左右语义 + 按几何选边入料 landed (采矿机 / 机械臂
-    // 入料从 LaneA||LaneB 回退改成 BeltNetwork.FeedsRightLane 确定性选边);
-    // determinism assert (h1 == h2) unaffected, only the pinned anchor moves.
-    private const ulong GOLDEN_TICK_800 = 17279884607642786012UL;
+    // re-baselined when RotateEntity landed —— Inserters/MiningDrills 的 WriteState
+    // 各多写一个 PendingRotation byte(排队转向,见 Inserters.SetPendingRotation /
+    // MiningDrills.SetPendingRotation)。determinism assert (h1 == h2) unaffected,
+    // only the pinned anchor moves.
+    private const ulong GOLDEN_TICK_800 = 6543756473640359196UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()

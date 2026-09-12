@@ -18,7 +18,7 @@ public sealed class MiningDrills
 
     public void RegisterDrill(EntityId id)
     {
-        _states[id] = new DrillRuntimeState(-1, -1, 0, false, 0);
+        _states[id] = new DrillRuntimeState(-1, -1, 0, false, 0);   // PendingRotation 默认 -1(无排队)
         _order.Add(id);
     }
 
@@ -33,6 +33,11 @@ public sealed class MiningDrills
     public long GetProgress(EntityId id) => _states.TryGetValue(id, out var s) ? s.Progress : 0;
     public bool IsCompleted(EntityId id) => _states.TryGetValue(id, out var s) && s.Completed;
     public int GetPendingItemProtoId(EntityId id) => _states.TryGetValue(id, out var s) ? s.PendingItemProtoId : 0;
+
+    // 排队转向的目标方向;-1 = 无排队。RotateEntity 在采矿机"挖完待排出"(IsCompleted)
+    // 时不立即改 EntityData.Rotation(排出格还没落地),排到这里,等下次 flush 成功、
+    // Completed 归 false 后(Simulation 的采矿 tick 循环)一次性应用。
+    public int GetPendingRotation(EntityId id) => _states.TryGetValue(id, out var s) ? s.PendingRotation : -1;
 
     public void SetTarget(EntityId id, int x, int y)
     {
@@ -60,11 +65,29 @@ public sealed class MiningDrills
     // (继续挖同一格)。
     public void ResetAfterFlush(EntityId id, int targetX, int targetY)
     {
-        _ = _states[id];   // 前置:已注册(throw-on-missing,同 SetTarget/AddProgress/MarkCompleted)
-        _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0);
+        // 排队转向和"这轮挖完没"是两码事:flush 成功、Completed 归 false 的这一刻正是
+        // Simulation 的采矿 tick 循环下 tick 消费排队转向的信号,所以这里必须把它带过去,
+        // 不能被这次 reset 顺手清掉(用 new DrillRuntimeState(...) 5 参构造会让
+        // PendingRotation 落回默认值 -1,等于消费窗口还没到就把排队值弄丢了)。
+        int pending = _states[id].PendingRotation;   // 前置:已注册(throw-on-missing,同 SetTarget/AddProgress/MarkCompleted)
+        _states[id] = new DrillRuntimeState(targetX, targetY, 0, false, 0, pending);
     }
 
-    // 按 EntityId.Index 排序后写:index/代数/目标坐标/进度/是否已完成/待放置物品 id。
+    // 排队一个转向;后发覆盖先发。前置:已注册。
+    public void SetPendingRotation(EntityId id, int rotation)
+    {
+        _ = _states[id];
+        _states[id] = _states[id] with { PendingRotation = rotation };
+    }
+
+    // 消费排队转向(Simulation 的采矿 tick 循环在 !Completed 时调,应用完清空)。前置:已注册。
+    public void ClearPendingRotation(EntityId id)
+    {
+        _ = _states[id];
+        _states[id] = _states[id] with { PendingRotation = -1 };
+    }
+
+    // 按 EntityId.Index 排序后写:index/代数/目标坐标/进度/是否已完成/待放置物品 id/排队转向。
     public void WriteState(IStateWriter writer)
     {
         writer.Write(_order.Count);
@@ -78,8 +101,9 @@ public sealed class MiningDrills
             writer.Write(s.Progress);
             writer.Write(s.Completed ? (byte)1 : (byte)0);
             writer.Write(s.PendingItemProtoId);
+            writer.Write(s.PendingRotation);
         }
     }
 }
 
-internal readonly record struct DrillRuntimeState(int TargetX, int TargetY, long Progress, bool Completed, int PendingItemProtoId);
+internal readonly record struct DrillRuntimeState(int TargetX, int TargetY, long Progress, bool Completed, int PendingItemProtoId, int PendingRotation = -1);

@@ -25,7 +25,7 @@ public sealed class Inserters
 
     public void RegisterInserter(EntityId id)
     {
-        _states[id] = new InserterState(0, 0);
+        _states[id] = new InserterState(0, 0);   // PendingRotation 默认 -1(无排队)
         _order.Add(id);
     }
 
@@ -37,6 +37,11 @@ public sealed class Inserters
 
     public int GetHeldItemProtoId(EntityId id) => _states.TryGetValue(id, out var s) ? s.HeldItemProtoId : 0;
     public long GetSwingProgress(EntityId id) => _states.TryGetValue(id, out var s) ? s.SwingProgress : 0;
+
+    // 排队转向的目标方向;-1 = 无排队。RotateEntity 在机械臂手上有东西时不立即改
+    // EntityData.Rotation(drop 格还没定,改了等于瞬移物品),排到这里,等下次手空
+    // 时(Simulation 的机械臂 tick 循环)一次性应用。
+    public int GetPendingRotation(EntityId id) => _states.TryGetValue(id, out var s) ? s.PendingRotation : -1;
 
     // 空手抓起:设手上物品,进度归 0(从抓取角开始往外摆)。前置:已注册。
     public void Grab(EntityId id, int itemProtoId)
@@ -66,7 +71,21 @@ public sealed class Inserters
         _states[id] = _states[id] with { SwingProgress = 0 };
     }
 
-    // 按 EntityId.Index 排序后写:index/代数/手上物品 id/摆臂进度。
+    // 排队一个转向;后发覆盖先发。前置:已注册。
+    public void SetPendingRotation(EntityId id, int rotation)
+    {
+        _ = _states[id];
+        _states[id] = _states[id] with { PendingRotation = rotation };
+    }
+
+    // 消费排队转向(Simulation 的机械臂 tick 循环在手空时调,应用完清空)。前置:已注册。
+    public void ClearPendingRotation(EntityId id)
+    {
+        _ = _states[id];
+        _states[id] = _states[id] with { PendingRotation = -1 };
+    }
+
+    // 按 EntityId.Index 排序后写:index/代数/手上物品 id/摆臂进度/排队转向。
     public void WriteState(IStateWriter writer)
     {
         writer.Write(_order.Count);
@@ -77,8 +96,9 @@ public sealed class Inserters
             writer.Write(id.Generation);
             writer.Write(s.HeldItemProtoId);
             writer.Write(s.SwingProgress);
+            writer.Write(s.PendingRotation);
         }
     }
 }
 
-internal readonly record struct InserterState(int HeldItemProtoId, long SwingProgress);
+internal readonly record struct InserterState(int HeldItemProtoId, long SwingProgress, int PendingRotation = -1);

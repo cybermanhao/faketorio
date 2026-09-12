@@ -445,6 +445,50 @@ public sealed class Simulation
                 Machines.SetRecipe(mid, command.ProtoId);
                 return;
             }
+            case CommandType.RotateEntity:
+            {
+                long rdx = Player.X - (command.X * 256 + 128);
+                long rdy = Player.Y - (command.Y * 256 + 128);
+                var rid = World.GetEntityAt(command.X, command.Y);
+                if (ValueNoise.Isqrt(rdx * rdx + rdy * rdy) > _playerProto.ReachSubTiles
+                    || command.Rotation > 3
+                    || !rid.IsValid || !Entities.IsAlive(rid)
+                    || !Prototypes.TryGetById(Entities.Get(rid).ProtoId, out var rProtoBase) || rProtoBase is not EntityPrototype rProto
+                    // 非方形占地(如 large-chest 2x3):转向要重排 footprint,本轮不支持。
+                    || rProto.TileWidth != rProto.TileHeight)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                ref var rData = ref Entities.Get(rid);
+                if (rData.Rotation == command.Rotation) return;   // 已是目标方向,no-op,不触发任何丢弃
+
+                if (rProto is TransportBeltPrototype)
+                {
+                    // 拆分/合并 + 丢弃跨断口物品全部复用 RemoveBelt/AddBelt 现有逻辑,零新 belt 代码。
+                    Belts.RemoveBelt(command.X, command.Y);
+                    rData.Rotation = command.Rotation;
+                    Belts.AddBelt(command.X, command.Y, command.Rotation);
+                }
+                else if (rProto is InserterPrototype && Inserters.GetHeldItemProtoId(rid) != 0)
+                {
+                    // 手上有物品:drop 格还没定,立即改朝向等于瞬间换目的地——排队,等手空了再应用。
+                    Inserters.SetPendingRotation(rid, command.Rotation);
+                }
+                else if (rProto is MiningDrillPrototype && MiningDrills.IsCompleted(rid))
+                {
+                    // 挖完待排出:排出格还没落地,同理排队,等 flush 成功后再应用。
+                    MiningDrills.SetPendingRotation(rid, command.Rotation);
+                }
+                else
+                {
+                    // 其它情况(含空闲的机械臂/采矿机、箱子/机器/电线杆/发电机):立即生效——
+                    // 它们的 tick 逻辑本就每 tick 现读 EntityData.Rotation。
+                    rData.Rotation = command.Rotation;
+                }
+                return;
+            }
             case CommandType.CraftEnqueue:
             {
                 if (command.X < 1 || command.X > 1_000_000
@@ -656,6 +700,17 @@ public sealed class Simulation
         foreach (var id in MiningDrills.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
+            // 排队转向(RotateEntity):挖完待排出(Completed)时危险,不在这消费——
+            // 等下 tick flush 成功、Completed 归 false 了再应用。
+            if (!MiningDrills.IsCompleted(id))
+            {
+                int pendingRot = MiningDrills.GetPendingRotation(id);
+                if (pendingRot >= 0)
+                {
+                    data.Rotation = (byte)pendingRot;
+                    MiningDrills.ClearPendingRotation(id);
+                }
+            }
             var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPreSettle(id, proto, data.X, data.Y, data.Rotation);
         }
@@ -778,6 +833,17 @@ public sealed class Simulation
         foreach (var id in Inserters.ActiveIdsList)
         {
             ref var data = ref Entities.Get(id);
+            // 排队转向(RotateEntity):手上有物品时危险(drop 格还没定),不在这消费——
+            // 等下 tick 手空了(Release 之后)再应用。
+            if (Inserters.GetHeldItemProtoId(id) == 0)
+            {
+                int pendingRot = Inserters.GetPendingRotation(id);
+                if (pendingRot >= 0)
+                {
+                    data.Rotation = (byte)pendingRot;
+                    Inserters.ClearPendingRotation(id);
+                }
+            }
             var proto = (InserterPrototype)Prototypes.GetById(data.ProtoId);
             InserterTickPostSettle(id, proto, data.X, data.Y, data.Rotation);
         }
