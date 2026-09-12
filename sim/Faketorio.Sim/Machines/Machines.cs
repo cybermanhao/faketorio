@@ -10,6 +10,8 @@ public sealed class Machines
 {
     private readonly Dictionary<EntityId, MachineRuntimeState> _states = new();
     private readonly OrderedEntityIdList _order = new();
+    private readonly OrderedEntityIdList _awake = new();
+    private readonly OrderedEntityIdList _asleep = new();
 
     public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
     internal List<EntityId> ActiveIdsList => _order.IdsList;
@@ -19,12 +21,40 @@ public sealed class Machines
     {
         _states[id] = new MachineRuntimeState(-1, 0, false);
         _order.Add(id);
+        _awake.Add(id);   // 新机器一律先醒着,走一次正常 tick 自己判断该不该睡。
     }
 
     public void UnregisterMachine(EntityId id)
     {
         _states.Remove(id);
         _order.Remove(id);
+        _awake.Remove(id);
+        _asleep.Remove(id);
+    }
+
+    public void MarkAwake(EntityId id)
+    {
+        if (!_states.ContainsKey(id)) return;   // 未注册(比如目标不是机器):空操作
+        _asleep.Remove(id);
+        _awake.Add(id);   // Add 本身对已存在的 id 是空操作(OrderedEntityIdList.Add)
+    }
+
+    public void MarkAsleep(EntityId id)
+    {
+        if (!_states.ContainsKey(id)) return;
+        _awake.Remove(id);
+        _asleep.Add(id);
+    }
+
+    internal EntityId[] AwakeSnapshot() => _awake.ToArray();
+    internal EntityId[] AsleepSnapshot() => _asleep.ToArray();
+
+    public bool IsAwake(EntityId id) => _states.ContainsKey(id) && !AsleepContains(id);
+
+    private bool AsleepContains(EntityId id)
+    {
+        foreach (var x in _asleep.Ids) if (x == id) return true;
+        return false;
     }
 
     public int GetCurrentRecipe(EntityId id) => _states.TryGetValue(id, out var s) ? s.CurrentRecipeProtoId : -1;

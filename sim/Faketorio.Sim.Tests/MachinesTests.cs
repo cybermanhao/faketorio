@@ -166,4 +166,99 @@ public class MachinesTests
 
         Assert.Equal(w1.Hash, w2.Hash);
     }
+
+    [Fact]
+    public void RegisterMachine_StartsAwake()
+    {
+        var m = new Machines();
+        var id = new EntityId(20, 1);
+        m.RegisterMachine(id);
+
+        Assert.True(m.IsAwake(id));
+        Assert.Contains(id, m.AwakeSnapshot());
+        Assert.DoesNotContain(id, m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void MarkAsleep_MovesFromAwakeToAsleep()
+    {
+        var m = new Machines();
+        var id = new EntityId(21, 1);
+        m.RegisterMachine(id);
+
+        m.MarkAsleep(id);
+
+        Assert.False(m.IsAwake(id));
+        Assert.Contains(id, m.AsleepSnapshot());
+        Assert.DoesNotContain(id, m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_MovesFromAsleepBackToAwake()
+    {
+        var m = new Machines();
+        var id = new EntityId(22, 1);
+        m.RegisterMachine(id);
+        m.MarkAsleep(id);
+
+        m.MarkAwake(id);
+
+        Assert.True(m.IsAwake(id));
+        Assert.Contains(id, m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAsleep_AlreadyAsleep_IsNoOp()
+    {
+        var m = new Machines();
+        var id = new EntityId(23, 1);
+        m.RegisterMachine(id);
+        m.MarkAsleep(id);
+
+        m.MarkAsleep(id);   // 第二次不应该抛异常或重复插入
+
+        Assert.Single(m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_AlreadyAwake_IsNoOp()
+    {
+        var m = new Machines();
+        var id = new EntityId(24, 1);
+        m.RegisterMachine(id);
+
+        m.MarkAwake(id);   // 已经醒着,第二次调用不应该重复插入
+
+        Assert.Single(m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_UnregisteredEntity_IsNoOp()
+    {
+        var m = new Machines();
+        var id = new EntityId(25, 1);
+
+        m.MarkAwake(id);   // 不应该抛异常——见 Simulation 里唤醒调用点可能对着
+                            // 非机器实体调用的场景(比如 dropEntity 不是机器时)
+
+        Assert.Empty(m.AwakeSnapshot());
+        Assert.Empty(m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void UnregisterMachine_RemovesFromAwakeOrAsleep()
+    {
+        var m = new Machines();
+        var idAwake = new EntityId(26, 1);
+        var idAsleep = new EntityId(27, 1);
+        m.RegisterMachine(idAwake);
+        m.RegisterMachine(idAsleep);
+        m.MarkAsleep(idAsleep);
+
+        m.UnregisterMachine(idAwake);
+        m.UnregisterMachine(idAsleep);
+
+        Assert.Empty(m.AwakeSnapshot());
+        Assert.Empty(m.AsleepSnapshot());
+    }
 }
