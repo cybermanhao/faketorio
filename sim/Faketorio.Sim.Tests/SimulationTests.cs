@@ -989,6 +989,48 @@ public class SimulationTests
         Assert.True(sim.Machines.GetProgress(asmId) > 0);   // now advancing from 0
     }
 
+    [Fact]
+    public void AssemblingMachine_NoRecipe_GoesAsleepWithinOneTick()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 0));
+        sim.Step();   // 放置
+
+        var asmId = sim.World.GetEntityAt(0, 0);
+        sim.Step();   // 一次 PreSettle 判断:没配方 -> 睡
+
+        Assert.False(sim.Machines.IsAwake(asmId));
+    }
+
+    [Fact]
+    public void AssemblingMachine_SafetyNet_SelfHealsWithoutExplicitWakeCall()
+    {
+        // 模拟"漏唤醒"场景:直接往输入库存塞原料(不经过任何命令/机械臂,
+        // 也不手动调 MarkAwake),断言安全网在 SafetyNetIntervalTicks 个 tick
+        // 之内自己把机器叫醒并推进——这是 spec §8 要求的关键回归测试,验证
+        // "唤醒调用点漏写"不会导致永久卡死。
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceAssembler(sim, 0, 2));
+        sim.Step();
+
+        var asmId = sim.World.GetEntityAt(0, 2);
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+        sim.Submit(SetRecipe(0, 2, gearRecipeId));
+        sim.Step();   // 有配方但没原料 -> PostSettle 判定 asleep
+
+        Assert.False(sim.Machines.IsAwake(asmId));
+
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        inputInv.Insert(plateId, 2, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+        // 故意不调 sim.Machines.MarkAwake —— 这就是"漏唤醒"的场景。
+
+        for (int t = 0; t < Machines.SafetyNetIntervalTicks; t++) sim.Step();
+
+        Assert.True(sim.Machines.GetProgress(asmId) > 0);   // 安全网救回来了
+    }
+
     private static Command PlaceDrill(Simulation sim, int x, int y, byte rotation = 0) => new()
     {
         Type = CommandType.PlaceEntity,

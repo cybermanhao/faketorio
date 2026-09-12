@@ -623,7 +623,19 @@ public sealed class Simulation
     // 先登记完需求,ElectricGrid.Settle() 才能看到本 tick 完整的需求总量。
     private void MachinesTickPreSettle()
     {
-        foreach (var id in Machines.ActiveIdsList)
+        // 睡着的机器:轻量待机登记 + 安全网。先拍快照再遍历——MarkAwake 可能
+        // 在这个循环体内修改 _asleep/_awake,不能直接 foreach 活列表
+        // (spec §7,C# 不允许边遍历边改同一个 List<T>)。
+        foreach (var id in Machines.AsleepSnapshot())
+        {
+            ref var data = ref Entities.Get(id);
+            var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
+            ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+            if (id.Index % Machines.SafetyNetIntervalTicks == Tick % Machines.SafetyNetIntervalTicks)
+                Machines.MarkAwake(id);
+        }
+
+        foreach (var id in Machines.AwakeSnapshot())
         {
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
@@ -658,6 +670,7 @@ public sealed class Simulation
             {
                 // 输出堵塞:跳过第 2 步(不重新匹配/不能开始新一轮),但仍登记待机能耗。
                 ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+                Machines.MarkAsleep(id);
                 return;
             }
         }
@@ -677,6 +690,15 @@ public sealed class Simulation
         }
         // 装配机:不自动匹配,只用玩家此前 SetRecipe 设置的结果(可能仍是 -1)。
 
+        // 仍然没有配方(装配机从没被 SetRecipe 过,或熔炉扫完一圈没匹配上):
+        // 睡眠等外部事件——见 spec §1 情况 A/D。
+        if (Machines.GetCurrentRecipe(id) == -1)
+        {
+            ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+            Machines.MarkAsleep(id);
+            return;
+        }
+
         // 第 3 步:电力需求登记(无条件——恒定待机能耗)
         ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
     }
@@ -684,7 +706,7 @@ public sealed class Simulation
     // 加工:进度推进 + 完成校验(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MachinesTickPostSettle()
     {
-        foreach (var id in Machines.ActiveIdsList)
+        foreach (var id in Machines.AwakeSnapshot())
         {
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
@@ -703,7 +725,11 @@ public sealed class Simulation
         bool satisfied = true;
         foreach (var ing in recipe.ResolvedIngredients)
             if (inputInv.CountOf(ing.ItemProtoId) < ing.Amount) { satisfied = false; break; }
-        if (!satisfied) return;   // 缺料:本 tick 冻结进度,不清零、不重置配方,等原料备齐
+        if (!satisfied)
+        {
+            Machines.MarkAsleep(id);
+            return;   // 缺料:本 tick 冻结进度,不清零、不重置配方,等原料备齐
+        }
 
         long threshold = (long)recipe.EnergyRequiredTicks << 16;
         var satisfaction = ElectricGrid.GetSatisfaction(id);
