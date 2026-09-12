@@ -51,6 +51,14 @@ RotateEntity 命令(横切):玩家事后转向已放置实体。`CommandType.Rot
 
 UPS-vs-scale 实测 + 找到超线性根因(2026-09-12,不改代码,纯调查):比起"实体真休眠/唤醒"先做了一轮量化——`--scale 1..800` 扫一遍(`--ticks 300~400 --warmup 1~2 --iterations 2~4`,已确认场景搭建 `ScenarioBuilder.Build` 在秒表启动前完成,不掺入测量),60 UPS 实时门槛在 **scale≈75(86.8 UPS)~scale≈100(49.3 UPS)** 之间失守;成本增长明显是**超线性/近平方**(scale 50→400 涨 8 倍规模,ns/tick 涨约 66 倍),而不是 P12 note ⑤假设的 O(n) 全量扫描。往下挖到根因:`ElectricGrid.FindNetworkAt`(`Electric/ElectricGrid.cs:65`)对电线杆列表做**无空间索引的线性扫描**,而 `Inserters`/`MiningDrills`/`Machines` 三个阶段**每个实体每 tick 都调一次** `RegisterDemand`(`Simulation.cs:660/681/795/817`),杆数又随 scale 线性增长——调用次数 O(scale) × 单次扫描 O(scale) = **O(scale²)**,精确解释了实测曲线;也解释了为什么"Inserters 44% / MiningDrills 29% / Machines 15%"这三个看似无关的阶段占比在不同 scale 下保持稳定(O(scale²) 元凶被摊到这仨阶段名下,单看某一阶段的 profiler 百分比看不出问题)。附带发现 scale=600 比 scale=400 快(3 次独立复核一致,非噪声)——判断是电线杆物理排布(方阵长宽比)影响线性扫描平均命中位置的锯齿效应,不是 bug。**结论**:`FindNetworkAt` 加空间索引(按坐标分桶/区间树,把 O(P) 降到接近 O(1))的收益是全局性的,会同时压低三个主力阶段的耗时,预计能把 60 UPS 门槛顶到明显高于 scale≈90——**优先级排在"实体真休眠/唤醒"前面**,因为休眠只解决"要不要跑这个实体的逻辑",跑不跑都还在原地调用这个 O(scale) 的查找。
 
+**性能债清单**(同一轮顺手核查了几个"看起来可疑"的地方,记录下来供后续挑优先级——只有 `FindNetworkAt` 是已确认的真问题,其余是"暂未发现异常"的排查记录,不是待办):
+- ❗ `ElectricGrid.FindNetworkAt`(见上)——**已确认** O(scale) 每次调用,O(scale²) 总量,是当前实测超线性曲线的主因。
+- ✅ `WorldGrid.GetEntityAt`(`World/WorldGrid.cs:26`)——chunk 分桶(32×32)+ chunk 内数组下标,真 O(1),不是嫌疑点。
+- ✅ `PrototypeRegistry.GetById`(`Prototypes/PrototypeRegistry.cs:48`)——数组下标,真 O(1)。
+- ⚪ `ElectricGrid.SettleNetwork` 里 `reg.Supply.FindAll(e => e.Priority == tier)`(`Electric/ElectricGrid.cs:175/221`)——每个网络每 tick 固定扫 3 个供给档 + 3 个需求档,是 O(scale) 不是 O(scale²),暂不算债,但如果以后网络内实体数继续涨,`FindAll` 每档都要重新过一遍整个 list,可以顺手换成一次分桶。
+- ⚪ 熔炉配方匹配(`Simulation.cs:669` 起的 `for (rid=0; rid<Prototypes.Count; rid++)`)——扫的是"配方原型总数"(内容量,跟 scale 无关),不是嫌疑点,但没验证过大量配方(几十上百种)时是否该加个按 Category 分组的索引,列一笔备查。
+- 未查:`Inventories`/`Belts` 内部的具体查找路径(`InventoryPool`/`BeltLinePool` 只看了对象池的空闲槽扫描,是 O(pool size) 不是 O(scale²),暂不算债)——如果之后决定动"实体真休眠"或更大规模压测,建议先把这几处也过一遍分阶段 profiler,确认没有第二个 `FindNetworkAt`。
+
 下一步:核心 sim 闭环(P1–P11)+ CI 回归基线(P12,含 `baselineNsPerTick` 校准)+ 活跃列表换路(P13)+ 表现层 v1(P14)+ 传送带 lane 选边入料 + P15(玩家 WASD/相机跟随/手挖)+ debug 覆盖层 + `RotateEntity` + 机器输入过滤 + 无电机械臂抓取 bug 已完成。**"小项清理"三项 + P12 遗留步骤全部做完**。P16(玩家碰撞盒 + 传送带带人移动)代码/审查已完成,在未合并分支上等人工 F5。剩余候选(无强依赖顺序,按价值/成本挑):① **`ElectricGrid.FindNetworkAt` 空间索引化**(刚定位到的 O(scale²) 根因,见上——预计比休眠/唤醒收益更直接、风险更低,不碰"睡眠语义正确性"这个确定性雷区;单独 brainstorm);② **实体真休眠 / 唤醒**(§5.3 —— 给实体加"睡着"标记、tick 跳过、触发器唤醒;唤醒条件是确定性雷区,机械臂 vs 每 tick 在动的传送带最难,且和"睡着实体是否耗电"耦合;bench golden + 分阶段计时是现成对照台架;性能红线现已生效,可以真的量出优化前后差异;**建议在①做完之后再评估是否还需要**,因为①本身可能已经把大部分超线性成本打掉;单独 brainstorm);③ **表现层后续**:视觉插值 lerp(要解决传送带物品跨 tick 身份匹配)、真美术(骨骼变换 vs 预渲染帧表)、完整命令 UI(快捷栏/背包/机器面板)、保留模式渲染(`TileMapLayer` + `MultiMesh`)、碰撞盒 debug 可视化(等 P16 合并)——各自单独 brainstorm。
 
 ## 0. 背景
