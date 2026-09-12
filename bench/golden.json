@@ -14,7 +14,7 @@
     "3750": "0x9862B916E70B24DE",
     "5000": "0x661839E89A38983B"
   },
-  "baselineNsPerTick": 0,
+  "baselineNsPerTick": 5683576,
   "perfFailMultiplier": 3,
   "recordedAtCommit": "9167012",
   "recordedAtUtc": "2026-09-12T13:37:28.5086725Z"
