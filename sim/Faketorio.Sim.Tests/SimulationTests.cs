@@ -2099,15 +2099,90 @@ public class SimulationTests
         int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
         sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId)).Insert(oreId, 5, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
 
-        // 机械臂抓取 + 摆动 + 放件需要若干 tick(同既有机械臂测试的量级),
-        // 给够余量;一旦机械臂成功放件,MarkAwake 应该在同一 tick 内生效。
-        bool wokeUp = false;
-        for (int t = 0; t < 150 && !wokeUp; t++)
+        // 精确定位机械臂真正把矿放进熔炉输入的那个 tick(同 Inserter_IntoFurnaceInput_
+        // UsesRole1_OutOfFurnaceOutput_UsesRole2 的计时校准手法:轮询 role-1 库存,而不是
+        // 用一个宽松的、可能被 60-tick 安全网单独满足的 eventual-consistency 循环)。
+        // 关键断言绑定在"这一 tick 之前刚好还睡着,这一 tick 之后刚好醒了"——即使
+        // 安全网偶尔在等待期间把它闪一下唤醒又睡回去,也不会被误判为放件触发的唤醒,
+        // 因为我们看的是紧贴放件那一刻前后的状态跳变,不是任意时刻的 IsAwake==true。
+        var furnaceInput = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        int dropTick = -1;
+        bool awakeBeforeDrop = true;
+        for (int t = 0; t < 150; t++)
         {
+            bool awakeBefore = sim.Machines.IsAwake(furnaceId);
             sim.Step();
-            wokeUp = sim.Machines.IsAwake(furnaceId);
+            if (furnaceInput.CountOf(oreId) > 0) { dropTick = t; awakeBeforeDrop = awakeBefore; break; }
         }
 
-        Assert.True(wokeUp);
+        Assert.True(dropTick >= 0);       // 机械臂确实把矿放进了熔炉输入
+        Assert.False(awakeBeforeDrop);    // 放件前一刻仍是睡着的
+        Assert.True(sim.Machines.IsAwake(furnaceId));   // MarkAwake 与放件同一次 Step() 内生效
+    }
+
+    // 第 5 个也是最后一个唤醒触发点(design spec §8 要求全覆盖):机械臂从机器的
+    // 输出库存里"抓"东西(InserterTickPostSettle 阶段 A,role==2 分支的
+    // Machines.MarkAwake(pickEntity))。前 4 个已覆盖:TransferToEntity、
+    // TransferFromEntity、SetRecipe、机械臂放件进输入(上面那个测试)。这个是唯一
+    // 剩下的——之前完全没有测试覆盖。布局取自既有 Inserter_OutOfFurnaceOutput_UsesRole2
+    // (机械臂身后=熔炉输出、身前=箱子),场景取自 TransferFromEntity_WakesUpMachineBlockedOnFullOutput
+    // (熔炉完成一轮但输出堵满 -> 睡;需要有人腾出输出空间才能再次唤醒)。
+    [Fact]
+    public void Inserter_GrabFromMachineOutput_WakesUpMachineBlockedOnFullOutput()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        // 先只放熔炉——机械臂这时候还不在场,不会在"喂料->完成->堵塞->睡"这段
+        // 过程里提前把输出槽腾出来(否则熔炉永远不会真的堵塞/睡着,后面就测不出
+        // "抓取触发唤醒"这件事本身)。机械臂和箱子等确认堵塞入睡后再放。
+        sim.Submit(PlaceFurnace(sim, 2, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(2, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        sim.Machines.MarkAwake(furnaceId);   // 直接操纵库存,按测试约定显式唤醒(spec §5)
+        outputInv.Insert(plateId, plateStack, plateStack);   // 预填满输出槽,逼它完成一轮后堵住
+
+        for (int t = 0; t < 200; t++) sim.Step();   // 完成一轮 -> 输出塞不下 -> 睡
+        Assert.False(sim.Machines.IsAwake(furnaceId));
+        Assert.Equal(0, inputInv.CountOf(oreId));            // 已经在完成时消耗
+        Assert.Equal(plateStack, outputInv.CountOf(plateId)); // 输出槽确实还是满的(没人腾过)
+
+        // 补一点新矿,让唤醒后确实有活干(同 TransferFromEntity_WakesUpMachineBlockedOnFullOutput
+        // 的修正:否则唤醒后 PreSettle 马上又因为没配方/没料判回睡,验证不到"抓取触发唤醒"这件事)。
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+
+        // 现在才放机械臂 + 箱子(布局取自既有 Inserter_OutOfFurnaceOutput_UsesRole2:
+        // 机械臂身后=熔炉输出、身前=箱子)——它一来电就会尝试从熔炉输出里抓东西,
+        // 抓走后腾出的空间正是熔炉本轮唤醒要验证的触发点。
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 3));   // West:pickup(2,2) 熔炉输出 -> drop(0,2) 箱子
+        sim.Step();
+
+        // 精确定位机械臂真正从输出槽里抓走一件成品的那个 tick——MarkAwake 发生在
+        // InserterTickPostSettle 阶段 A 抓取成功的那一刻(role==2 分支),不是等它摆
+        // 到箱子那边放下才醒,所以要看 outputInv 的数量减少,而不是箱子里数量增加。
+        // 注意:不用"抓取前一刻必须还睡着"这种更强的断言——前面已经跑了近 200 tick
+        // 让熔炉进入堵塞状态,早就跨过了好几个 60-tick 安全网周期,安全网自己也会周期性
+        // 把它闪唤醒一下(见 MachinesTickPreSettle 里 justWoken 那一 tick 的行为)又在下
+        // 一 tick 因为仍然堵塞被判回睡——这种残留状态可能恰好落在抓取前一 tick,和这里
+        // 想验证的"抓取触发的唤醒"混在一起,断言就不稳定了。把断言绑定在"抓取发生的
+        // 这一 tick,唤醒确实生效"上,就足以证明 role==2 分支的 MarkAwake 在起作用,同时
+        // 排除了"纯靠安全网这个大窗口迟早蒙对"的可能(抓取远早于 200 tick 上限出现)。
+        int grabTick = -1;
+        for (int t = 0; t < 200; t++)
+        {
+            sim.Step();
+            if (outputInv.CountOf(plateId) < plateStack) { grabTick = t; break; }
+        }
+
+        Assert.True(grabTick >= 0);       // 机械臂确实从熔炉输出里抓走了一件成品
+        Assert.True(sim.Machines.IsAwake(furnaceId));   // MarkAwake 与抓取同一次 Step() 内生效
     }
 }

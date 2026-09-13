@@ -37,6 +37,14 @@ public sealed class Simulation
 
     private readonly CommandQueue _commands = new();
 
+    // 本 tick 被安全网(§7 fallback)唤醒的机器:MarkAwake 已生效(进了 _awake),
+    // 但本 tick 的待机需求已经在 asleep 循环里登记过一次了——awake 循环这一轮
+    // 必须跳过它们(PreSettle 的 RegisterDemand 和 PostSettle 的进度推进都跳过),
+    // 否则会对同一实体同一 tick 重复 RegisterDemand,让电网 totalDemand 虚高、
+    // 拉低同网络其它 PrimaryInput 消费者的 satisfaction。安全网唤醒的效果从
+    // 下一 tick 的 MachinesTickPreSettle 开始才完整生效。
+    private readonly HashSet<EntityId> _safetyNetWokenThisTick = new();
+
     public Simulation(PrototypeRegistry prototypes, long worldSeed = 0, IStepProfiler? profiler = null)
     {
         Prototypes = prototypes;
@@ -629,17 +637,25 @@ public sealed class Simulation
         // 睡着的机器:轻量待机登记 + 安全网。先拍快照再遍历——MarkAwake 可能
         // 在这个循环体内修改 _asleep/_awake,不能直接 foreach 活列表
         // (spec §7,C# 不允许边遍历边改同一个 List<T>)。
+        _safetyNetWokenThisTick.Clear();
         foreach (var id in Machines.AsleepSnapshot())
         {
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
             ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
             if (id.Index % Machines.SafetyNetIntervalTicks == Tick % Machines.SafetyNetIntervalTicks)
+            {
                 Machines.MarkAwake(id);
+                _safetyNetWokenThisTick.Add(id);
+            }
         }
 
         foreach (var id in Machines.AwakeSnapshot())
         {
+            // 本 tick 刚被安全网唤醒:上面 asleep 循环已经登记过它这一 tick 的需求了,
+            // 这里再跑一遍 MachineTickPreSettle 会二次 RegisterDemand——跳过,下一
+            // tick 起才当作正常 awake 机器处理。
+            if (_safetyNetWokenThisTick.Contains(id)) continue;
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
             MachineTickPreSettle(id, proto, data.X, data.Y);
@@ -711,6 +727,10 @@ public sealed class Simulation
     {
         foreach (var id in Machines.AwakeSnapshot())
         {
+            // 同上:本 tick 刚被安全网唤醒的机器,PreSettle 那一半(flush/配方/需求登记)
+            // 本 tick 没跑过,PostSettle 的进度推进这里也一并跳过,保持“唤醒从下一
+            // 整 tick 起才生效”的一致性。
+            if (_safetyNetWokenThisTick.Contains(id)) continue;
             ref var data = ref Entities.Get(id);
             var proto = (CraftingMachinePrototype)Prototypes.GetById(data.ProtoId);
             MachineTickPostSettle(id, proto);

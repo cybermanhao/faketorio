@@ -79,7 +79,13 @@ public class BenchScenarioTests
     // 完成/唤醒),但不改变最终结果的正确性。determinism assert (h1 == h2)
     // unaffected, only the pinned anchor moves. 见
     // docs/superpowers/specs/2026-09-12-machines-sleep-wake-design.md §6。
-    private const ulong GOLDEN_TICK_800 = 5855795861733251759UL;
+    //
+    // 二次 re-baseline:final-review Finding 1 修复了"安全网唤醒当 tick 的机器
+    // 会被 asleep 循环 + awake 循环各 RegisterDemand 一次(重复计入电网需求)"的
+    // 问题——安全网唤醒改为从下一整 tick 起才真正生效(见 Simulation.cs
+    // MachinesTickPreSettle/PostSettle 里的 _safetyNetWokenThisTick 跳过逻辑)。
+    // 这是一次真实的、确定性的行为修正,tick-by-tick 结果因此改变,锚点需要再次移动。
+    private const ulong GOLDEN_TICK_800 = 6543756473640359196UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
