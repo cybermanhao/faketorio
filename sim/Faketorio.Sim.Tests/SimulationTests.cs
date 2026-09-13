@@ -1398,6 +1398,51 @@ public class SimulationTests
     }
 
     [Fact]
+    public void MiningDrill_MissedWakeCall_SelfHealsWithinSafetyNetWindow()
+    {
+        // Spec §8's safety-net self-heal test (final-review Important #1): simulate a
+        // "missed wake call" bug — output space frees up but NONE of the 3 production
+        // wake triggers (RotateEntity/TransferFromEntity/inserter grab) and no explicit
+        // MiningDrills.WakeWaitersAt run. The drill must still resume within
+        // SafetyNetIntervalTicks ticks via the 60-tick modulo fallback in
+        // MiningDrillsTickPreSettle, or it would be stuck asleep forever.
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine (seed 0)
+
+        // Fill the output chest completely so the finished item has nowhere to go.
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int coalStack = sim.Prototypes.Get<ItemPrototype>("coal").StackSize;
+        int cap = chestInv.SlotCount * coalStack;
+        Assert.Equal(cap, chestInv.Insert(coal, cap, coalStack));
+
+        for (int t = 0; t < 200; t++) sim.Step(); // well past one 60-tick cycle at full power
+
+        Assert.True(sim.MiningDrills.IsCompleted(drillId)); // cycle done, item pending
+        Assert.False(sim.MiningDrills.IsAwake(drillId));    // registered as blocked-output waiter, asleep
+
+        chestInv.Remove(coal, coalStack); // free one slot — NO WakeWaitersAt call, no other trigger.
+
+        // The safety net wakes drill `id` on the tick where
+        // id.Index % SafetyNetIntervalTicks == Tick % SafetyNetIntervalTicks. Tick % 60
+        // sweeps every residue 0..59 exactly once across any 60 consecutive ticks, so
+        // stepping exactly SafetyNetIntervalTicks ticks from here is guaranteed to hit
+        // the drill's residue at least once, regardless of the current tick's phase.
+        for (int t = 0; t < MiningDrills.SafetyNetIntervalTicks; t++) sim.Step();
+
+        Assert.True(sim.MiningDrills.IsAwake(drillId));      // safety net woke it with nothing else telling it to
+        Assert.False(sim.MiningDrills.IsCompleted(drillId)); // pending item flushed, fresh cycle started
+        Assert.True(chestInv.TotalItems() > (chestInv.SlotCount - 1) * coalStack); // pending item flushed in
+    }
+
+    [Fact]
     public void MiningDrill_UnderpoweredSatisfaction_TakesTwiceAsLong()
     {
         var sim = NewSim();
