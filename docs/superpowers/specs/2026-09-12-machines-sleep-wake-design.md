@@ -108,12 +108,22 @@ PostSettle 只推进进度,而睡着的机器按定义没有进度可推进)。
 `SafetyNetIntervalTicks` 定为 `60`(1 秒游戏时间的默认兜底周期),先写死常量,
 不做成运行时可配置——性能验证后如果需要调,再改。
 
-## 5. 唤醒触发点(4 处)
+## 5. 唤醒触发点(5 处生产代码路径 + 1 条测试约定)
 
 - `Simulation.Apply` 的 `SetRecipe` 分支:设置完配方后 `Machines.MarkAwake(id)`。
 - `Simulation.Apply` 的 `TransferToEntity` 分支:成功塞进机器输入库存(`role 1`)后 `Machines.MarkAwake(targetId)`。
+- `Simulation.Apply` 的 `TransferFromEntity` 分支:成功从机器输出库存(`role 2`)取走物品后 `Machines.MarkAwake(sourceId)`(brainstorm 阶段最初漏掉这一条——玩家手动从机器输出拿东西也会腾出空间,跟机械臂取件是同一类事件,场景中 `Machine_OutputBlocked_HoldsCompletedUntilSpaceFrees` 这条既有测试就是靠这条路径腾空间)。
 - `InserterTickPostSettle` 的放件分支:成功塞进机器输入库存后 `Machines.MarkAwake(dropEntity)`。
 - `InserterTickPostSettle` 的阶段 A 抓取分支:成功从机器输出库存(`role 2`)取走物品后 `Machines.MarkAwake(pickEntity)`。
+
+**测试约定(必须遵守,否则安全网之外无法自愈)**:现有测试里大量地方直接调用
+`Inventory.Insert`/`Remove` 操纵机器的输入/输出库存(绕过上面 5 个命令/机械臂
+路径,模拟"外部喂料/取料"),这类直接操纵**摸不到任何唤醒钩子**——
+`Inventories`/`Inventory` 刻意不知道 `Machines` 的存在,不会,也不应该,反向
+通知。任何这样写的测试,如果期望机器在**少于 60 tick**(安全网周期)内做出
+反应,必须在直接操纵库存之后紧跟一行 `sim.Machines.MarkAwake(machineId)`;
+如果测试本来就要跑 60 tick 以上,可以依赖安全网自愈,不用额外调用。已知至少
+两条既有测试属于"少于 60 tick 就断言"的情况,需要在实施时修——见实施计划。
 
 ## 6. 确定性 / WriteState
 
