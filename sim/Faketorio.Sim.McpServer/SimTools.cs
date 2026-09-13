@@ -136,4 +136,36 @@ public static class SimTools
         }
         return new InventoryInfo(inv.SlotCount, slots);
     }
+
+    [McpServerTool, Description("按名字查原型 id；同名可能匹配多个不同类型的原型（item 和 entity 允许同名），此时都返回，自己按 TypeName 挑")]
+    public static List<PrototypeInfo> ResolvePrototype(string name, string? typeName = null)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+        return CollectPrototypes(p => p.Name == name && (typeName is null || p.GetType().Name == typeName));
+    }
+
+    [McpServerTool, Description("列出全部已加载的原型（名字+类型），用于发现能用什么")]
+    public static List<PrototypeInfo> ListPrototypes(string? typeNameFilter = null)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+        return CollectPrototypes(p => typeNameFilter is null || p.GetType().Name == typeNameFilter);
+    }
+
+    private static List<PrototypeInfo> CollectPrototypes(Func<Faketorio.Sim.Prototypes.PrototypeBase, bool> predicate)
+    {
+        var result = new List<PrototypeInfo>();
+        for (int i = 0; i < SimHost.Sim!.Prototypes.Count; i++)
+        {
+            var proto = SimHost.Sim.Prototypes.GetById(i);
+            if (predicate(proto)) result.Add(new PrototypeInfo(proto.Id, proto.Name, proto.GetType().Name));
+        }
+        return result;
+    }
+
+    [McpServerTool, Description("计算当前模拟状态的 FNV-1a 哈希，用于跨会话对拍确定性")]
+    public static HashResult ComputeStateHash()
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+        return new HashResult(SimHost.Sim.ComputeStateHash());
+    }
 }

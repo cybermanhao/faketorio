@@ -195,4 +195,82 @@ public class SimToolsTests
         Assert.NotNull(result);
         Assert.Contains(result!.Slots, s => s.ItemName == "iron-ore" && s.Count == 5);
     }
+
+    [Fact]
+    public void ResolvePrototype_KnownName_ReturnsOneMatch()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ResolvePrototype("stone-furnace");
+
+        Assert.Single(result);
+        Assert.Equal("stone-furnace", result[0].Name);
+        Assert.Equal("FurnacePrototype", result[0].TypeName);
+    }
+
+    [Fact]
+    public void ResolvePrototype_UnknownName_ReturnsEmptyList()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ResolvePrototype("this-does-not-exist");
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ResolvePrototype_WithTypeNameFilter_NarrowsMatch()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ResolvePrototype("stone-furnace", typeName: "FurnacePrototype");
+
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void ListPrototypes_ReturnsAllLoadedPrototypes()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ListPrototypes();
+
+        Assert.True(result.Count > 0);
+        Assert.Contains(result, p => p.Name == "stone-furnace");
+    }
+
+    [Fact]
+    public void ListPrototypes_WithFilter_OnlyReturnsMatchingType()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ListPrototypes(typeNameFilter: "FurnacePrototype");
+
+        Assert.All(result, p => Assert.Equal("FurnacePrototype", p.TypeName));
+        Assert.Contains(result, p => p.Name == "stone-furnace");
+    }
+
+    [Fact]
+    public void ComputeStateHash_SameSeedSameCommands_ProducesSameHash()
+    {
+        SimTools.ResetSimulation(seed: 7);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoName: "stone-furnace", rotation: 0);
+        SimTools.Step(ticks: 10);
+        var hash1 = SimTools.ComputeStateHash();
+
+        SimTools.ResetSimulation(seed: 7);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoName: "stone-furnace", rotation: 0);
+        SimTools.Step(ticks: 10);
+        var hash2 = SimTools.ComputeStateHash();
+
+        Assert.Equal(hash1.Hash, hash2.Hash);
+    }
+
+    [Fact]
+    public void ComputeStateHash_BeforeAnyReset_Throws()
+    {
+        typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
+
+        Assert.Throws<InvalidOperationException>(() => SimTools.ComputeStateHash());
+    }
 }

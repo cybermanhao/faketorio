@@ -13,3 +13,7 @@ public record EntityInfo(int Index, int Generation, string ProtoName, int ProtoI
 public record SlotInfo(int Slot, string ItemName, int ItemProtoId, int Count);
 
 public record InventoryInfo(int SlotCount, List<SlotInfo> Slots);
+
+public record PrototypeInfo(int Id, string Name, string TypeName);
+
+public record HashResult(ulong Hash);
