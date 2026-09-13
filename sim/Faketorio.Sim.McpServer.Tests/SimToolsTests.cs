@@ -123,4 +123,76 @@ public class SimToolsTests
             SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "this-does-not-exist"));
         Assert.Contains("this-does-not-exist", ex.Message);
     }
+
+    [Fact]
+    public void GetEntityAt_EmptyTile_ReturnsNull()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.GetEntityAt(999, 999);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetEntityAt_AfterPlacingEntity_ReturnsInfo()
+    {
+        SimTools.ResetSimulation(seed: 1);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "stone-furnace", rotation: 2);
+        SimTools.Step(ticks: 1);
+
+        var result = SimTools.GetEntityAt(5, 5);
+
+        Assert.NotNull(result);
+        Assert.Equal("stone-furnace", result!.ProtoName);
+        Assert.Equal(5, result.X);
+        Assert.Equal(5, result.Y);
+        Assert.Equal(2, result.Rotation);
+    }
+
+    [Fact]
+    public void GetEntityAt_BeforeAnyReset_Throws()
+    {
+        typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
+
+        Assert.Throws<InvalidOperationException>(() => SimTools.GetEntityAt(0, 0));
+    }
+
+    [Fact]
+    public void GetInventory_EmptyTile_ReturnsNull()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.GetInventory(999, 999);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetInventory_InvalidRoleForEntity_ReturnsNull()
+    {
+        SimTools.ResetSimulation(seed: 1);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "wooden-chest", rotation: 0);
+        SimTools.Step(ticks: 1);
+
+        var result = SimTools.GetInventory(5, 5, role: 99);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void GetInventory_ChestWithItems_ListsNonEmptySlots()
+    {
+        SimTools.ResetSimulation(seed: 1);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "wooden-chest", rotation: 0);
+        SimTools.Step(ticks: 1);
+        var chestId = SimTools.Sim!.World.GetEntityAt(5, 5);
+        int oreId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("iron-ore").Id;
+        SimTools.Sim!.Inventories.Get(SimTools.Sim!.Inventories.GetInventoryId(chestId)).Insert(oreId, 5, 50);
+
+        var result = SimTools.GetInventory(5, 5);
+
+        Assert.NotNull(result);
+        Assert.Contains(result!.Slots, s => s.ItemName == "iron-ore" && s.Count == 5);
+    }
 }

@@ -100,4 +100,40 @@ public static class SimTools
 
         return new SubmitResult(Queued: true);
     }
+
+    [McpServerTool, Description("查询指定坐标的实体，没有实体返回 null")]
+    public static EntityInfo? GetEntityAt(int x, int y)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+
+        var id = SimHost.Sim.World.GetEntityAt(x, y);
+        if (!id.IsValid) return null;
+
+        ref var data = ref SimHost.Sim.Entities.Get(id);
+        string protoName = SimHost.Sim.Prototypes.GetById(data.ProtoId).Name;
+        return new EntityInfo(id.Index, id.Generation, protoName, data.ProtoId, data.X, data.Y, data.Rotation);
+    }
+
+    [McpServerTool, Description("查询指定坐标实体的库存内容（role 默认 0，机器/发电机等多库存实体可能需要传 1 或 2）")]
+    public static InventoryInfo? GetInventory(int x, int y, int role = 0)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+
+        var entityId = SimHost.Sim.World.GetEntityAt(x, y);
+        if (!entityId.IsValid) return null;
+
+        var invId = SimHost.Sim.Inventories.GetInventoryId(entityId, role);
+        if (!invId.IsValid) return null;
+
+        var inv = SimHost.Sim.Inventories.Get(invId);
+        var slots = new List<SlotInfo>();
+        for (int s = 0; s < inv.SlotCount; s++)
+        {
+            var stack = inv[s];
+            if (stack.IsEmpty) continue;
+            string itemName = SimHost.Sim.Prototypes.GetById(stack.ItemProtoId).Name;
+            slots.Add(new SlotInfo(s, itemName, stack.ItemProtoId, stack.Count));
+        }
+        return new InventoryInfo(inv.SlotCount, slots);
+    }
 }
