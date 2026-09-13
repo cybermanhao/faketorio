@@ -45,6 +45,9 @@ public sealed class Simulation
     // 下一 tick 的 MachinesTickPreSettle 开始才完整生效。
     private readonly HashSet<EntityId> _safetyNetWokenThisTick = new();
 
+    // 同上,采矿机版本;另外也用于 RotateEntity 的快速唤醒(Task 4)——那种情况下
+    // 严格来说不是"安全网"唤醒,但需要同样的"这个 tick 先跳过、下个 tick 才正常处理"
+    // 语义,复用同一个集合更省事,见 Step()/RotateEntity 分支的注释。
     private readonly HashSet<EntityId> _safetyNetWokenDrillsThisTick = new();
 
     public Simulation(PrototypeRegistry prototypes, long worldSeed = 0, IStepProfiler? profiler = null)
@@ -68,6 +71,16 @@ public sealed class Simulation
 
     public void Step()
     {
+        // 提前到 Commands 之前清空(而不是像 Machines 那样留到 MiningDrillsTickPreSettle
+        // 开头才清):RotateEntity 命令(Commands 阶段,早于本 tick 的 MiningDrillsTickPreSettle)
+        // 唤醒的采矿机需要往这个集合里登记自己,才能在下面 MiningDrillsTickPreSettle 的
+        // awake 循环里被跳过——否则案例 A(无目标)的采矿机会在同一 tick 内被重新搜索
+        // 一次、没找到矿又立刻改判回睡,外部调用方(RotateEntity 之后紧跟的 IsAwake 查询)
+        // 就观察不到"至少醒一整个 tick"这个设计承诺(见 Task 4 spec:不保证这次搜索找到矿,
+        // 但保证真的醒了)。挪到这里清空,含义不变(仍是每 Step 一次),只是把清空点让给
+        // Commands 阶段能先写入。
+        _safetyNetWokenDrillsThisTick.Clear();
+
         _profiler?.Begin(StepPhase.Commands);
         var commands = _commands.BeginTick();
         for (int i = 0; i < commands.Length; i++)
@@ -447,6 +460,7 @@ public sealed class Simulation
                 int inserted2 = Player.Inventory.Insert(command.ProtoId, removed, itemProto2.StackSize);
                 System.Diagnostics.Debug.Assert(inserted2 == removed, "TransferFromEntity: amount was pre-clamped to available space, insert should never partially fail");
                 if (sourceRole == 2 && removed > 0) Machines.MarkAwake(eid2);
+                if (removed > 0) MiningDrills.WakeWaitersAt(command.X, command.Y);
                 return;
             }
             case CommandType.SetRecipe:
@@ -505,6 +519,20 @@ public sealed class Simulation
                     // 其它情况(含空闲的机械臂/采矿机、箱子/机器/电线杆/发电机):立即生效——
                     // 它们的 tick 逻辑本就每 tick 现读 EntityData.Rotation。
                     rData.Rotation = command.Rotation;
+                    if (rProto is MiningDrillPrototype)
+                    {
+                        // 转向可能露出新矿格——给它一次重新搜索的机会。不保证这次搜索
+                        // 真的能找到矿(原地不动的采矿机转向不换 footprint,大概率还是没有),
+                        // 但要保证调用方至少能在本 tick 观察到它醒着:本 tick 的
+                        // MiningDrillsTickPreSettle 还没跑到,如果直接 MarkAwake 不做
+                        // 别的处理,awake 循环马上就会把它重新搜索一遍、没找到矿又立刻
+                        // 判回睡,外部就看不到"醒了"这个事实。登记进
+                        // _safetyNetWokenDrillsThisTick,让本 tick 的 awake 循环跳过它一次
+                        // (同安全网唤醒的处理方式),真正的重新搜索从下一 tick 开始。
+                        bool wasAsleep = !MiningDrills.IsAwake(rid);
+                        MiningDrills.MarkAwake(rid);
+                        if (wasAsleep) _safetyNetWokenDrillsThisTick.Add(rid);
+                    }
                 }
                 return;
             }
@@ -782,7 +810,8 @@ public sealed class Simulation
     // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
     private void MiningDrillsTickPreSettle()
     {
-        _safetyNetWokenDrillsThisTick.Clear();
+        // 清空挪到了 Step() 顶部(Commands 之前)——RotateEntity 的快速唤醒需要赶在
+        // Commands 阶段就登记进这个集合,这里不能再清一次,否则会把它冲掉。
         foreach (var id in MiningDrills.AsleepSnapshot())
         {
             ref var data = ref Entities.Get(id);
@@ -1007,6 +1036,7 @@ public sealed class Simulation
                         inv.Remove(itemId, 1);
                         Inserters.Grab(id, itemId);
                         if (role == 2) Machines.MarkAwake(pickEntity);
+                        MiningDrills.WakeWaitersAt(pickX, pickY);
                         break;
                     }
                 }

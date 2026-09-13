@@ -2251,4 +2251,119 @@ public class SimulationTests
         Assert.True(grabTick >= 0);       // 机械臂确实从熔炉输出里抓走了一件成品
         Assert.True(sim.Machines.IsAwake(furnaceId));   // MarkAwake 与抓取同一次 Step() 内生效
     }
+
+    [Fact]
+    public void RotateEntity_RevealsNewTarget_WakesUpSleepingDrill()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // (0,20)-(1,21) 空地(同上一个测试的探测);找一个转个向就能碰到矿的朝向,
+        // 或者退而求其次:只断言转向后 IsAwake 变 true(RotateEntity 无条件唤醒,
+        // 不要求这次转向本身一定找得到矿——设计只承诺"给它一次重新搜索的机会")。
+        int px = 0, py = 20;
+        sim.Submit(PlaceDrill(sim, px, py, rotation: 1));
+        sim.Step();
+        var drillId = sim.World.GetEntityAt(px, py);
+        sim.Step();   // 没矿 -> 睡
+        Assert.False(sim.MiningDrills.IsAwake(drillId));
+
+        // 玩家默认出生在 (0,0),ReachSubTiles=1536(6 tile),够不到 (0,20) 的采矿机——
+        // RotateEntity 会因为超出距离静默 RejectedCommandCount++ 而不是真的转向。
+        // 直接把玩家瞬移到采矿机旁边(MoveTo 是 internal,测试项目通过
+        // InternalsVisibleTo 可见),不用真的走过去。
+        sim.Player.MoveTo(px * 256 + 128, py * 256 + 128);
+        sim.Submit(new Command { Type = CommandType.RotateEntity, X = px, Y = py, Rotation = 2 });
+        sim.Step();
+
+        Assert.True(sim.MiningDrills.IsAwake(drillId));   // 转向立即唤醒,不管这次搜索最终有没有找到矿
+    }
+
+    [Fact]
+    public void TransferFromEntity_WakesUpDrillBlockedOnFullOutputChest()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东输出到 (2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
+
+        // 把箱子塞满(16 槽 x 某个 stack size 的任意填充物),逼采矿机挖完之后卡住。
+        int fillerId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int fillerStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        for (int s = 0; s < 16; s++) chestInv.Insert(fillerId, fillerStack, fillerStack);
+
+        for (int t = 0; t < 200; t++) sim.Step();   // 挖完一份 -> 塞不进箱子 -> 睡
+        Assert.False(sim.MiningDrills.IsAwake(drillId));
+
+        // 精确定位箱子腾出空间的那个 tick,断言唤醒发生在紧邻的那个 tick 内——不用
+        // 宽松的 eventual-consistency 循环(Machines 最终审查 Finding 2 教训:那样
+        // 可能被 60-tick 安全网碰巧满足,测不出 WakeWaitersAt 这条路径本身)。
+        int before = chestInv.CountOf(fillerId);
+        sim.Submit(TransferFrom(2, 2, fillerId, fillerStack));
+        sim.Step();
+
+        Assert.True(chestInv.CountOf(fillerId) < before);   // 命令确实腾出了空间
+        Assert.True(sim.MiningDrills.IsAwake(drillId));      // 同一 tick 内唤醒生效
+    }
+
+    [Fact]
+    public void Inserter_GrabFromChest_WakesUpDrillBlockedOnThatChest()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东输出到 (2,2)
+        sim.Submit(PlaceChest(sim, 2, 2));
+        sim.Step();
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+        var chestId = sim.World.GetEntityAt(2, 2);
+        var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
+
+        int fillerId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int fillerStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+        for (int s = 0; s < 16; s++) chestInv.Insert(fillerId, fillerStack, fillerStack);
+
+        for (int t = 0; t < 200; t++) sim.Step();
+        Assert.False(sim.MiningDrills.IsAwake(drillId));
+
+        // 现在才放机械臂(身后=箱子(2,2)、身前=另一个箱子(4,2)),让它把箱子里的东西搬走。
+        // 机械臂在 (3,2),离唯一的电线杆 (0,0) 的 Chebyshev 距离是 3,超出
+        // small-electric-pole 的 supplyAreaDistanceTiles(2)——单靠那根杆够不到它,
+        // 机械臂会因为 satisfaction==0 永远不抓。补一根线距内(<=7)的杆在 (3,4)
+        // (不能放 (3,0)——那里是发电机 2x2 footprint (2,0)-(3,1) 已经占用的格子,
+        // PlaceEntity 会被 RejectedCommandCount 静默拒绝):供电区覆盖到 (3,2)
+        // (Chebyshev 距离 2),同时通过 maximumWireDistanceTiles(7)并入已有电网
+        // (距 (0,0) 为 4,在 7 以内)。
+        sim.Submit(PlacePole(sim, 3, 4));
+        sim.Submit(PlaceChest(sim, 4, 2));
+        sim.Submit(PlaceInserter(sim, 3, 2, rotation: 1));   // East: pickup(2,2) chest -> drop(4,2) chest
+        sim.Step();
+
+        int fillCount = chestInv.CountOf(fillerId);
+        int grabTick = -1;
+        for (int t = 0; t < 200; t++)
+        {
+            sim.Step();
+            if (chestInv.CountOf(fillerId) < fillCount) { grabTick = t; break; }
+        }
+
+        Assert.True(grabTick >= 0);   // 机械臂确实从箱子里抓走了东西
+        Assert.True(sim.MiningDrills.IsAwake(drillId));   // WakeWaitersAt 与抓取同一次 Step() 内生效
+    }
 }
