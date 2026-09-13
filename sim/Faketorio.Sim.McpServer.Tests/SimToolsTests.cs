@@ -229,6 +229,31 @@ public class SimToolsTests
     }
 
     [Fact]
+    public void ResolvePrototype_AmbiguousName_NoFilter_ReturnsAllMatches()
+    {
+        // "wooden-chest" 在 data/base 里同时注册为 ItemPrototype（物品）、
+        // ContainerPrototype（可放置的实体）和 RecipePrototype（配方）——
+        // 不加 typeName 过滤应该三个都返回，用来验证"同名多类型都返回"这条行为
+        // 真的生效，而不是巧合地只有一个匹配。
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ResolvePrototype("wooden-chest");
+
+        Assert.True(result.Count > 1);
+    }
+
+    [Fact]
+    public void ResolvePrototype_AmbiguousName_WithTypeNameFilter_NarrowsToOne()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        var result = SimTools.ResolvePrototype("wooden-chest", typeName: "ItemPrototype");
+
+        Assert.Single(result);
+        Assert.Equal("ItemPrototype", result[0].TypeName);
+    }
+
+    [Fact]
     public void ListPrototypes_ReturnsAllLoadedPrototypes()
     {
         SimTools.ResetSimulation(seed: 1);
