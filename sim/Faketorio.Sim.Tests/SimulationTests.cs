@@ -767,6 +767,7 @@ public class SimulationTests
         var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
         int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
         inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        sim.Machines.MarkAwake(furnaceId);   // 直接操纵输入库存,按测试约定显式唤醒
 
         int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
         var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
@@ -950,17 +951,19 @@ public class SimulationTests
         int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
 
         inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
-        outputInv.Insert(plateId, plateStack, plateStack);   // pre-fill the furnace's one output slot
+        sim.Machines.MarkAwake(furnaceId);   // 直接操纵输入库存,按测试约定显式唤醒
+        outputInv.Insert(plateId, plateStack, plateStack);   // 预填满输出槽(不触发任何唤醒/睡眠判断,合法)
 
         for (int t = 0; t < 200; t++) sim.Step();
 
         Assert.Equal(0, inputInv.CountOf(oreId));            // consumed at completion
         Assert.Equal(plateStack, outputInv.CountOf(plateId)); // still full — flush blocked
+        Assert.False(sim.Machines.IsAwake(furnaceId));   // 新增断言:确认它确实睡了,不是碰巧还醒着
 
-        outputInv.Remove(plateId, plateStack);   // free the output
+        sim.Submit(TransferFrom(0, 2, plateId, plateStack));   // 真实路径腾空间,同时是 Task 4 的唤醒触发点
         sim.Step();
 
-        Assert.Equal(1, outputInv.CountOf(plateId));   // flushed on the next tick
+        Assert.Equal(1, outputInv.CountOf(plateId));
     }
 
     [Fact]
@@ -984,6 +987,7 @@ public class SimulationTests
         var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
         int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
         inputInv.Insert(plateId, 2, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+        sim.Machines.MarkAwake(asmId);   // 直接操纵输入库存,按测试约定显式唤醒
 
         sim.Step();
         Assert.True(sim.Machines.GetProgress(asmId) > 0);   // now advancing from 0
