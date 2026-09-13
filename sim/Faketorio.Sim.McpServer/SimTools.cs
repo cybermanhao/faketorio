@@ -27,4 +27,77 @@ public static class SimTools
         if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
         return new TickInfo(SimHost.Sim.Tick, SimHost.Sim.RejectedCommandCount);
     }
+
+    // 供测试直接验证提交命令后的模拟状态，不是 MCP 工具。
+    internal static Simulation? Sim => SimHost.Sim;
+
+    [McpServerTool, Description("推进模拟若干 tick")]
+    public static StepResult Step([Description("要跑的 tick 数，默认 1")] int ticks = 1)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+        if (ticks < 1) throw new ArgumentOutOfRangeException(nameof(ticks), ticks, "ticks 必须 >= 1");
+
+        int before = SimHost.Sim.RejectedCommandCount;
+        for (int i = 0; i < ticks; i++) SimHost.Sim.Step();
+        int after = SimHost.Sim.RejectedCommandCount;
+
+        return new StepResult(SimHost.Sim.Tick, after, after - before);
+    }
+
+    [McpServerTool, Description(
+        "提交一条原子命令（不会立即执行，下次 step 时生效）。type 取值：" +
+        "PlaceEntity/RemoveEntity/MovePlayer/StopPlayer/MineStart/MineStop/" +
+        "CraftEnqueue/TransferToEntity/TransferFromEntity/SetRecipe/RotateEntity")]
+    public static SubmitResult SubmitCommand(
+        [Description("命令类型，见工具描述里的取值列表")] string type,
+        [Description("目标/来源坐标 X")] int x,
+        [Description("目标/来源坐标 Y")] int y,
+        [Description("原型 id（和 protoName 二选一）")] int? protoId = null,
+        [Description("原型名字（和 protoId 二选一，内部查表转 id）")] string? protoName = null,
+        [Description("朝向 0=北 1=东 2=南 3=西，默认 0")] byte rotation = 0,
+        [Description("数量，默认 0")] int count = 0)
+    {
+        if (SimHost.Sim is null) throw new InvalidOperationException(NotReadyError.Message);
+
+        if (!Enum.TryParse<Faketorio.Sim.Commands.CommandType>(type, ignoreCase: true, out var commandType))
+        {
+            string validValues = string.Join("/", Enum.GetNames<Faketorio.Sim.Commands.CommandType>());
+            throw new ArgumentException($"未知的命令类型 '{type}'，合法值：{validValues}", nameof(type));
+        }
+
+        if (protoId.HasValue == (protoName is not null))
+            throw new ArgumentException("protoId 和 protoName 必须二选一（不能都给，也不能都不给）。");
+
+        int resolvedProtoId;
+        if (protoId.HasValue)
+        {
+            resolvedProtoId = protoId.Value;
+        }
+        else
+        {
+            resolvedProtoId = -1;
+            for (int i = 0; i < SimHost.Sim.Prototypes.Count; i++)
+            {
+                if (SimHost.Sim.Prototypes.GetById(i).Name == protoName)
+                {
+                    resolvedProtoId = i;
+                    break;
+                }
+            }
+            if (resolvedProtoId == -1)
+                throw new ArgumentException($"找不到名字是 '{protoName}' 的原型。", nameof(protoName));
+        }
+
+        SimHost.Sim.Submit(new Faketorio.Sim.Commands.Command
+        {
+            Type = commandType,
+            ProtoId = resolvedProtoId,
+            X = x,
+            Y = y,
+            Rotation = rotation,
+            Count = count,
+        });
+
+        return new SubmitResult(Queued: true);
+    }
 }
