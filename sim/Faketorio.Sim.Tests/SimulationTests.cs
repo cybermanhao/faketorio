@@ -1180,6 +1180,43 @@ public class SimulationTests
     }
 
     [Fact]
+    public void MiningDrill_BlockedByFullBeltLane_StaysAwake_UnlikeChestBlocked()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        sim.Submit(new Command { Type = CommandType.PlaceEntity,
+            ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
+            X = 2, Y = 2, Rotation = 1 });                          // 单格带,无下游消费者
+        sim.Step();
+
+        bool foundResource = false;
+        for (int dy = 0; dy < 2 && !foundResource; dy++)
+            for (int dx = 0; dx < 2 && !foundResource; dx++)
+                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
+        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
+
+        var drillId = sim.World.GetEntityAt(0, 2);
+
+        // 单格带长 256 subtiles,每个物品占 64 subtiles -> 单条 lane 最多塞 4 个。
+        // 没有下游消费者,跑够久之后这条 lane 必然被喂满,TryInsertAtBack 之后
+        // 每次都失败——这正是"堵在传送带里"的稳态。
+        for (int t = 0; t < 600; t++) sim.Step();
+
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        int itemsOnLine = line.LaneA.Count + line.LaneB.Count;
+        Assert.True(itemsOnLine > 0, "expected the belt lane to have received at least one item");
+
+        // 案例 C(堵在传送带里):设计明确要求维持现状,不睡眠——继续再跑一大段,
+        // 采矿机应当全程保持清醒(只会被传送带满卡住,不会被 MarkAsleep)。
+        for (int t = 0; t < 200; t++)
+        {
+            sim.Step();
+            Assert.True(sim.MiningDrills.IsAwake(drillId), $"drill blocked by a full belt lane must stay awake (tick {t})");
+        }
+    }
+
+    [Fact]
     public void Inserter_ParallelToBelt_DropsToRightLane()
     {
         var sim = NewSim();

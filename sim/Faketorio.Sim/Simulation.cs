@@ -856,12 +856,16 @@ public sealed class Simulation
             }
             else
             {
-                // 输出堵塞:跳过第 2 步,但仍登记待机能耗;注册为这个坐标的等待者,
-                // 等有人从这个库存里拿走东西再被唤醒(见 §3——目标是别人的库存,
-                // 按坐标反查,不是按自身 EntityId)。
+                // 输出堵塞:跳过第 2 步,但仍登记待机能耗。只有"堵在非传送带库存里"
+                // (chest/large-chest)才睡眠 + 注册等待者——堵在传送带里维持现状,
+                // 每 tick 正常跑(设计明确要求,案例 C 不睡)。outLineId.IsValid 为
+                // true 时说明这次 placed==false 是传送带满了,不是库存满了。
                 ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
-                MiningDrills.RegisterBlockedOutputWaiter(id, outX, outY);
-                MiningDrills.MarkAsleep(id);
+                if (!outLineId.IsValid)
+                {
+                    MiningDrills.RegisterBlockedOutputWaiter(id, outX, outY);
+                    MiningDrills.MarkAsleep(id);
+                }
                 return;
             }
         }
