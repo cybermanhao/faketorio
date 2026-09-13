@@ -1088,6 +1088,35 @@ public class SimulationTests
     }
 
     [Fact]
+    public void MiningDrill_NoResourceUnderFootprint_GoesAsleepAndStaysAsleep()
+    {
+        var sim = NewSim();
+        PlacePoweredDrillInfra(sim);
+        // 找一个确定没有矿的 2x2 区域(默认种子全局覆盖率只有 ~11%,大多数格子
+        // 都是空的)——用同样的探测手法但反过来断言:必须全空。
+        int px = 0, py = 20;   // 远离其它测试用到的坐标,避免踩到别的矿脉
+        bool anyResource = false;
+        for (int dy = 0; dy < 2 && !anyResource; dy++)
+            for (int dx = 0; dx < 2 && !anyResource; dx++)
+                if (!sim.Resources.GetResourceAt(px + dx, py + dy).IsEmpty) anyResource = true;
+        Assert.False(anyResource, "test assumes (0,20)-(1,21) has no ore under the default seed — if this fails, pick a different empty coordinate.");
+
+        sim.Submit(PlaceDrill(sim, px, py, rotation: 1));
+        sim.Step();   // 放置
+        var drillId = sim.World.GetEntityAt(px, py);
+
+        sim.Step();   // 目标搜索失败 -> 睡
+
+        Assert.False(sim.MiningDrills.IsAwake(drillId));
+
+        long progressBefore = sim.MiningDrills.GetProgress(drillId);
+        for (int t = 0; t < 200; t++) sim.Step();   // 远超一次安全网周期(60),期间没有任何外部事件
+
+        Assert.Equal(progressBefore, sim.MiningDrills.GetProgress(drillId));   // 完全没有进展——安全网把它闪醒了几次,但每次重新搜索仍然找不到矿,又睡回去
+        Assert.Equal(-1, sim.MiningDrills.GetTargetX(drillId));
+    }
+
+    [Fact]
     public void MiningDrill_OutputsToBelt_WithCorrectItemType()
     {
         var sim = NewSim();

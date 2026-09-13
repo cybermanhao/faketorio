@@ -45,6 +45,8 @@ public sealed class Simulation
     // 下一 tick 的 MachinesTickPreSettle 开始才完整生效。
     private readonly HashSet<EntityId> _safetyNetWokenThisTick = new();
 
+    private readonly HashSet<EntityId> _safetyNetWokenDrillsThisTick = new();
+
     public Simulation(PrototypeRegistry prototypes, long worldSeed = 0, IStepProfiler? profiler = null)
     {
         Prototypes = prototypes;
@@ -780,8 +782,22 @@ public sealed class Simulation
     // 采矿:目标搜索 + 电力需求登记(Settle() 之前)。两趟扫描的第一趟。
     private void MiningDrillsTickPreSettle()
     {
-        foreach (var id in MiningDrills.ActiveIdsList)
+        _safetyNetWokenDrillsThisTick.Clear();
+        foreach (var id in MiningDrills.AsleepSnapshot())
         {
+            ref var data = ref Entities.Get(id);
+            var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
+            ElectricGrid.RegisterDemand(id, data.X, data.Y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+            if (id.Index % MiningDrills.SafetyNetIntervalTicks == Tick % MiningDrills.SafetyNetIntervalTicks)
+            {
+                MiningDrills.MarkAwake(id);
+                _safetyNetWokenDrillsThisTick.Add(id);
+            }
+        }
+
+        foreach (var id in MiningDrills.AwakeSnapshot())
+        {
+            if (_safetyNetWokenDrillsThisTick.Contains(id)) continue;   // 本 tick 已经登记过需求,跳过重复登记(Machines 最终审查 Finding 1 同款修复)
             ref var data = ref Entities.Get(id);
             // 排队转向(RotateEntity):挖完待排出(Completed)时危险,不在这消费——
             // 等下 tick flush 成功、Completed 归 false 了再应用。
@@ -840,8 +856,12 @@ public sealed class Simulation
             }
             else
             {
-                // 输出堵塞:跳过第 2 步,但仍登记待机能耗。
+                // 输出堵塞:跳过第 2 步,但仍登记待机能耗;注册为这个坐标的等待者,
+                // 等有人从这个库存里拿走东西再被唤醒(见 §3——目标是别人的库存,
+                // 按坐标反查,不是按自身 EntityId)。
                 ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+                MiningDrills.RegisterBlockedOutputWaiter(id, outX, outY);
+                MiningDrills.MarkAsleep(id);
                 return;
             }
         }
@@ -862,6 +882,15 @@ public sealed class Simulation
             }
         }
 
+        // 仍然没有目标(脚下矿脉挖空,搜索失败):睡眠,永久(资源不会重新生成,
+        // 唯一能解除的事件是 RotateEntity 换个 footprint——见 Task 4)。
+        if (MiningDrills.GetTargetX(id) == -1)
+        {
+            ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
+            MiningDrills.MarkAsleep(id);
+            return;
+        }
+
         // 第 3 步:电力需求登记(无条件——恒定待机能耗)
         ElectricGrid.RegisterDemand(id, x, y, UsagePriority.PrimaryInput, proto.EnergyUsageJPerTick);
     }
@@ -869,8 +898,9 @@ public sealed class Simulation
     // 采矿:进度推进 + 产出(Settle() 之后,可读 satisfaction)。两趟扫描的第二趟。
     private void MiningDrillsTickPostSettle()
     {
-        foreach (var id in MiningDrills.ActiveIdsList)
+        foreach (var id in MiningDrills.AwakeSnapshot())
         {
+            if (_safetyNetWokenDrillsThisTick.Contains(id)) continue;
             ref var data = ref Entities.Get(id);
             var proto = (MiningDrillPrototype)Prototypes.GetById(data.ProtoId);
             MiningDrillTickPostSettle(id, proto);
