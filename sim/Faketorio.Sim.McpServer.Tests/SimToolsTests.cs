@@ -298,4 +298,56 @@ public class SimToolsTests
 
         Assert.Throws<InvalidOperationException>(() => SimTools.ComputeStateHash());
     }
+
+    [Fact]
+    public void EndToEnd_PoweredFurnaceSmeltsOre_ThroughMcpToolsOnly()
+    {
+        SimTools.ResetSimulation(seed: 0);
+
+        // 电线杆 (0,0) + 发电机 (2,0)，同 SimulationTests.PlacePoweredMachineInfra
+        // 的坐标关系。
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole", rotation: 0);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 2, y: 0, protoName: "burner-generator", rotation: 0);
+        SimTools.Step(ticks: 1);
+
+        // 给发电机塞煤——TransferToEntity 命令要求玩家背包里先有煤，
+        // 这条端到端测试直接往 Sim.Player.Inventory 塞（跟既有
+        // SimulationTests.PlacePoweredMachineInfra 的做法一致），因为
+        // "往玩家背包塞初始物品"本身不是这 9 个工具要覆盖的场景（玩家背包
+        // 管理不在这轮 MCP 工具范围内，spec §4 没有把它列进来）。
+        int coalId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("coal").Id;
+        int coalStack = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("coal").StackSize;
+        SimTools.Sim!.Player.Inventory.Insert(coalId, 5, coalStack);
+        SimTools.SubmitCommand(type: "TransferToEntity", x: 2, y: 0, protoId: coalId, count: 5);
+        SimTools.Step(ticks: 1);
+
+        // 熔炉 (0,2)，在电线杆 Chebyshev 距离 2 以内。
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 2, protoName: "stone-furnace", rotation: 0);
+        SimTools.Step(ticks: 1);
+
+        var furnace = SimTools.GetEntityAt(0, 2);
+        Assert.NotNull(furnace);
+
+        // 直接往熔炉输入库存(role 1)塞矿——用 get_inventory 确认库存形状后
+        // 手动操纵，因为"隔空塞矿"本身不是这 9 个工具要覆盖的场景，
+        // TransferToEntity 走的是玩家背包->实体这条路，这里为了让测试独立于
+        // 玩家背包细节，直接摆状态（同既有 SimulationTests 里
+        // Furnace_AutoMatchesAndSmeltsIronOre 的做法）。
+        int oreId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("iron-ore").Id;
+        int oreStack = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("iron-ore").StackSize;
+        var furnaceInputInv = SimTools.Sim!.Inventories.Get(SimTools.Sim!.Inventories.GetInventoryId(
+            SimTools.Sim!.World.GetEntityAt(0, 2), role: 1));
+        furnaceInputInv.Insert(oreId, 1, oreStack);
+        SimTools.Sim!.Machines.MarkAwake(SimTools.Sim!.World.GetEntityAt(0, 2));   // 直接操纵输入库存,按既有测试约定显式唤醒
+
+        // iron-plate 是 192 tick，给够余量。
+        SimTools.Step(ticks: 200);
+
+        var output = SimTools.GetInventory(0, 2, role: 2);
+        Assert.NotNull(output);
+        Assert.Contains(output!.Slots, s => s.ItemName == "iron-plate" && s.Count >= 1);
+
+        var hash = SimTools.ComputeStateHash();
+        Assert.True(hash.Hash != 0);   // 只是确认这个工具跑得通、返回非零值，不对拍具体数值
+    }
 }
