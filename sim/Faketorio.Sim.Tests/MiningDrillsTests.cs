@@ -175,4 +175,102 @@ public class MiningDrillsTests
 
         Assert.Equal(w1.Hash, w2.Hash);
     }
+
+    [Fact]
+    public void RegisterDrill_StartsAwake()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(1, 1);
+        m.RegisterDrill(id);
+
+        Assert.True(m.IsAwake(id));
+        Assert.Contains(id, m.AwakeSnapshot());
+        Assert.DoesNotContain(id, m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void MarkAsleep_MovesFromAwakeToAsleep()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(2, 1);
+        m.RegisterDrill(id);
+
+        m.MarkAsleep(id);
+
+        Assert.False(m.IsAwake(id));
+        Assert.Contains(id, m.AsleepSnapshot());
+        Assert.DoesNotContain(id, m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_MovesFromAsleepBackToAwake()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(3, 1);
+        m.RegisterDrill(id);
+        m.MarkAsleep(id);
+
+        m.MarkAwake(id);
+
+        Assert.True(m.IsAwake(id));
+        Assert.Contains(id, m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAsleep_AlreadyAsleep_IsNoOp()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(4, 1);
+        m.RegisterDrill(id);
+        m.MarkAsleep(id);
+
+        m.MarkAsleep(id);
+
+        Assert.Single(m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_AlreadyAwake_IsNoOp()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(5, 1);
+        m.RegisterDrill(id);
+
+        m.MarkAwake(id);
+
+        Assert.Single(m.AwakeSnapshot());
+    }
+
+    [Fact]
+    public void MarkAwake_UnregisteredEntity_IsNoOp()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(6, 1);
+
+        m.MarkAwake(id);   // 不应该抛异常
+
+        Assert.Empty(m.AwakeSnapshot());
+        Assert.Empty(m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void UnregisterDrill_RemovesFromAwakeOrAsleep()
+    {
+        var m = new MiningDrills();
+        var idAwake = new EntityId(7, 1);
+        var idAsleep = new EntityId(8, 1);
+        m.RegisterDrill(idAwake);
+        m.RegisterDrill(idAsleep);
+        m.MarkAsleep(idAsleep);
+
+        m.UnregisterDrill(idAwake);
+        m.UnregisterDrill(idAsleep);
+
+        Assert.Empty(m.AwakeSnapshot());
+        Assert.Empty(m.AsleepSnapshot());
+    }
+
+    [Fact]
+    public void SafetyNetIntervalTicks_Is60()
+        => Assert.Equal(60, MiningDrills.SafetyNetIntervalTicks);
 }

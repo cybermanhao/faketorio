@@ -11,21 +11,54 @@ public sealed class MiningDrills
 {
     private readonly Dictionary<EntityId, DrillRuntimeState> _states = new();
     private readonly OrderedEntityIdList _order = new();
+    private readonly OrderedEntityIdList _awake = new();
+    private readonly OrderedEntityIdList _asleep = new();
 
     public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
     internal List<EntityId> ActiveIdsList => _order.IdsList;
     internal int StateCount => _states.Count;
 
+    // 60 tick(1 秒游戏时间)的兜底安全网周期——见设计 spec §5/§9。
+    public const int SafetyNetIntervalTicks = 60;
+
     public void RegisterDrill(EntityId id)
     {
         _states[id] = new DrillRuntimeState(-1, -1, 0, false, 0);   // PendingRotation 默认 -1(无排队)
         _order.Add(id);
+        _awake.Add(id);   // 新采矿机一律先醒着,走一次正常 tick 自己判断该不该睡。
     }
 
     public void UnregisterDrill(EntityId id)
     {
         _states.Remove(id);
         _order.Remove(id);
+        _awake.Remove(id);
+        _asleep.Remove(id);
+    }
+
+    public void MarkAwake(EntityId id)
+    {
+        if (!_states.ContainsKey(id)) return;   // 未注册(比如目标不是采矿机):空操作
+        _asleep.Remove(id);
+        _awake.Add(id);
+    }
+
+    public void MarkAsleep(EntityId id)
+    {
+        if (!_states.ContainsKey(id)) return;
+        _awake.Remove(id);
+        _asleep.Add(id);
+    }
+
+    internal EntityId[] AwakeSnapshot() => _awake.ToArray();
+    internal EntityId[] AsleepSnapshot() => _asleep.ToArray();
+
+    public bool IsAwake(EntityId id) => _states.ContainsKey(id) && !AsleepContains(id);
+
+    private bool AsleepContains(EntityId id)
+    {
+        foreach (var x in _asleep.Ids) if (x == id) return true;
+        return false;
     }
 
     public int GetTargetX(EntityId id) => _states.TryGetValue(id, out var s) ? s.TargetX : -1;
