@@ -273,4 +273,100 @@ public class MiningDrillsTests
     [Fact]
     public void SafetyNetIntervalTicks_Is60()
         => Assert.Equal(60, MiningDrills.SafetyNetIntervalTicks);
+
+    [Fact]
+    public void RegisterBlockedOutputWaiter_ThenWakeWaitersAt_WakesUpAndClears()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(10, 1);
+        m.RegisterDrill(id);
+        m.MarkAsleep(id);
+        m.RegisterBlockedOutputWaiter(id, 5, 7);
+
+        m.WakeWaitersAt(5, 7);
+
+        Assert.True(m.IsAwake(id));
+    }
+
+    [Fact]
+    public void WakeWaitersAt_MultipleWaitersSameCoordinate_WakesAll()
+    {
+        var m = new MiningDrills();
+        var idA = new EntityId(11, 1);
+        var idB = new EntityId(12, 1);
+        m.RegisterDrill(idA);
+        m.RegisterDrill(idB);
+        m.MarkAsleep(idA);
+        m.MarkAsleep(idB);
+        m.RegisterBlockedOutputWaiter(idA, 3, 3);
+        m.RegisterBlockedOutputWaiter(idB, 3, 3);
+
+        m.WakeWaitersAt(3, 3);
+
+        Assert.True(m.IsAwake(idA));
+        Assert.True(m.IsAwake(idB));
+    }
+
+    [Fact]
+    public void WakeWaitersAt_DifferentCoordinate_DoesNotWake()
+    {
+        var m = new MiningDrills();
+        var id = new EntityId(13, 1);
+        m.RegisterDrill(id);
+        m.MarkAsleep(id);
+        m.RegisterBlockedOutputWaiter(id, 1, 1);
+
+        m.WakeWaitersAt(2, 2);   // 不同坐标
+
+        Assert.False(m.IsAwake(id));
+    }
+
+    [Fact]
+    public void WakeWaitersAt_NoWaiters_IsNoOp()
+    {
+        var m = new MiningDrills();
+        m.WakeWaitersAt(99, 99);   // 不应该抛异常
+    }
+
+    [Fact]
+    public void WakeWaitersAt_SameCoordinateCalledTwice_SecondCallIsNoOp()
+    {
+        // WakeWaitersAt 唤醒后要把 key 从表里移除——第二次调用同一坐标不应该
+        // 再"唤醒"任何东西(此时列表已空,验证的是"不留残留状态"而不是具体行为)。
+        var m = new MiningDrills();
+        var id = new EntityId(14, 1);
+        m.RegisterDrill(id);
+        m.MarkAsleep(id);
+        m.RegisterBlockedOutputWaiter(id, 4, 4);
+
+        m.WakeWaitersAt(4, 4);
+        m.MarkAsleep(id);   // 手动睡回去,模拟"唤醒后又堵住了"
+        m.WakeWaitersAt(4, 4);   // 表已经空了,这次调用不应该再把它唤醒
+
+        Assert.False(m.IsAwake(id));
+    }
+
+    [Fact]
+    public void UnregisterDrill_RemovesFromBlockedOutputWaiters()
+    {
+        // 采矿机被卸载后,如果还挂在某个坐标的等待列表里,必须被清理掉——
+        // 否则 WakeWaitersAt 会对着一个已经不存在状态的 EntityId 调 MarkAwake
+        // (MarkAwake 本身对未注册 id 是空操作,不会崩溃,但列表会无限增长)。
+        var m = new MiningDrills();
+        var idStays = new EntityId(15, 1);
+        var idRemoved = new EntityId(16, 1);
+        m.RegisterDrill(idStays);
+        m.RegisterDrill(idRemoved);
+        m.MarkAsleep(idStays);
+        m.MarkAsleep(idRemoved);
+        m.RegisterBlockedOutputWaiter(idStays, 9, 9);
+        m.RegisterBlockedOutputWaiter(idRemoved, 9, 9);
+
+        m.UnregisterDrill(idRemoved);
+        m.WakeWaitersAt(9, 9);
+
+        Assert.True(m.IsAwake(idStays));
+        // idRemoved 已卸载,IsAwake 对未注册 id 恒为 false,这里只验证 idStays 没受影响
+        // ——UnregisterDrill 没有把整个 (9,9) 列表清空,只精确移除了 idRemoved 那一条。
+    }
 }

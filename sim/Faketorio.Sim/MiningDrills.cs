@@ -14,6 +14,10 @@ public sealed class MiningDrills
     private readonly OrderedEntityIdList _awake = new();
     private readonly OrderedEntityIdList _asleep = new();
 
+    // 按产出坐标反查"谁在等这个格子腾空间"——采矿机的产出目标是别人的库存
+    // (箱子/大箱),不是自己的,不能像 Machines 那样直接用自身 EntityId 做唤醒 key。
+    private readonly Dictionary<(int X, int Y), List<EntityId>> _blockedOutputWaiters = new();
+
     public IReadOnlyList<EntityId> ActiveIds => _order.Ids;
     internal List<EntityId> ActiveIdsList => _order.IdsList;
     internal int StateCount => _states.Count;
@@ -34,6 +38,7 @@ public sealed class MiningDrills
         _order.Remove(id);
         _awake.Remove(id);
         _asleep.Remove(id);
+        foreach (var waiters in _blockedOutputWaiters.Values) waiters.Remove(id);
     }
 
     public void MarkAwake(EntityId id)
@@ -59,6 +64,22 @@ public sealed class MiningDrills
     {
         foreach (var x in _asleep.Ids) if (x == id) return true;
         return false;
+    }
+
+    public void RegisterBlockedOutputWaiter(EntityId id, int x, int y)
+    {
+        if (!_blockedOutputWaiters.TryGetValue((x, y), out var waiters))
+            _blockedOutputWaiters[(x, y)] = waiters = new List<EntityId>();
+        if (!waiters.Contains(id)) waiters.Add(id);
+    }
+
+    // 某个坐标腾出了库存空间——唤醒所有在这个坐标排队等待的采矿机,并把这个
+    // key 从表里移除。
+    public void WakeWaitersAt(int x, int y)
+    {
+        if (!_blockedOutputWaiters.TryGetValue((x, y), out var waiters)) return;
+        foreach (var id in waiters) MarkAwake(id);
+        _blockedOutputWaiters.Remove((x, y));
     }
 
     public int GetTargetX(EntityId id) => _states.TryGetValue(id, out var s) ? s.TargetX : -1;
