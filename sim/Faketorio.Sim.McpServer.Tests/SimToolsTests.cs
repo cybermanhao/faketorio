@@ -37,7 +37,7 @@ public class SimToolsTests
         // 测试执行顺序。
         typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => SimTools.GetTick());
+        var ex = Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.GetTick());
         Assert.Equal(NotReadyError.Message, ex.Message);
     }
 
@@ -58,8 +58,8 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => SimTools.Step(ticks: 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() => SimTools.Step(ticks: -1));
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.Step(ticks: 0));
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.Step(ticks: -1));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class SimToolsTests
     {
         typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => SimTools.Step(ticks: 1));
+        var ex = Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.Step(ticks: 1));
         Assert.Equal(NotReadyError.Message, ex.Message);
     }
 
@@ -76,7 +76,7 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        var ex = Assert.Throws<ArgumentException>(() =>
+        var ex = Assert.Throws<ModelContextProtocol.McpException>(() =>
             SimTools.SubmitCommand(type: "NotARealCommandType", x: 0, y: 0));
         Assert.Contains("PlaceEntity", ex.Message);   // 错误信息要列出合法值
     }
@@ -86,7 +86,7 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
             SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoId: 1, protoName: "stone-furnace"));
     }
 
@@ -95,7 +95,7 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Throws<ModelContextProtocol.McpException>(() =>
             SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0));
     }
 
@@ -119,9 +119,23 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        var ex = Assert.Throws<ArgumentException>(() =>
+        var ex = Assert.Throws<ModelContextProtocol.McpException>(() =>
             SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "this-does-not-exist"));
         Assert.Contains("this-does-not-exist", ex.Message);
+    }
+
+    [Fact]
+    public void SubmitCommand_AmbiguousProtoName_Throws()
+    {
+        // "wooden-chest" 同名匹配 ItemPrototype/ContainerPrototype/RecipePrototype
+        // 三个不同类型的原型（同 ResolvePrototype_AmbiguousName_NoFilter_ReturnsAllMatches
+        // 用的场景）。protoName 解析必须在这种情况下报错而不是悄悄挑一个，否则
+        // 命令可能用错的 ProtoId 提交，行为诡异且无提示。
+        SimTools.ResetSimulation(seed: 1);
+
+        var ex = Assert.Throws<ModelContextProtocol.McpException>(() =>
+            SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "wooden-chest"));
+        Assert.Contains("歧义", ex.Message);
     }
 
     [Fact]
@@ -155,7 +169,15 @@ public class SimToolsTests
     {
         typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
 
-        Assert.Throws<InvalidOperationException>(() => SimTools.GetEntityAt(0, 0));
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.GetEntityAt(0, 0));
+    }
+
+    [Fact]
+    public void GetInventory_BeforeAnyReset_Throws()
+    {
+        typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
+
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.GetInventory(0, 0));
     }
 
     [Fact]
@@ -172,7 +194,10 @@ public class SimToolsTests
     public void GetInventory_InvalidRoleForEntity_ReturnsNull()
     {
         SimTools.ResetSimulation(seed: 1);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "wooden-chest", rotation: 0);
+        // "wooden-chest" 现在同名匹配 3 种原型类型，protoName 会因为歧义报错——
+        // 这里用 protoId 指定确切想要的 ContainerPrototype，避开歧义检查。
+        int chestProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ContainerPrototype>("wooden-chest").Id;
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoId: chestProtoId, rotation: 0);
         SimTools.Step(ticks: 1);
 
         var result = SimTools.GetInventory(5, 5, role: 99);
@@ -184,7 +209,8 @@ public class SimToolsTests
     public void GetInventory_ChestWithItems_ListsNonEmptySlots()
     {
         SimTools.ResetSimulation(seed: 1);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "wooden-chest", rotation: 0);
+        int chestProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ContainerPrototype>("wooden-chest").Id;
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoId: chestProtoId, rotation: 0);
         SimTools.Step(ticks: 1);
         var chestId = SimTools.Sim!.World.GetEntityAt(5, 5);
         int oreId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("iron-ore").Id;
@@ -194,6 +220,14 @@ public class SimToolsTests
 
         Assert.NotNull(result);
         Assert.Contains(result!.Slots, s => s.ItemName == "iron-ore" && s.Count == 5);
+    }
+
+    [Fact]
+    public void ResolvePrototype_BeforeAnyReset_Throws()
+    {
+        typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
+
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.ResolvePrototype("stone-furnace"));
     }
 
     [Fact]
@@ -254,6 +288,14 @@ public class SimToolsTests
     }
 
     [Fact]
+    public void ListPrototypes_BeforeAnyReset_Throws()
+    {
+        typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
+
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.ListPrototypes());
+    }
+
+    [Fact]
     public void ListPrototypes_ReturnsAllLoadedPrototypes()
     {
         SimTools.ResetSimulation(seed: 1);
@@ -296,7 +338,7 @@ public class SimToolsTests
     {
         typeof(SimHost).GetField(nameof(SimHost.Sim))!.SetValue(null, null);
 
-        Assert.Throws<InvalidOperationException>(() => SimTools.ComputeStateHash());
+        Assert.Throws<ModelContextProtocol.McpException>(() => SimTools.ComputeStateHash());
     }
 
     [Fact]
@@ -348,6 +390,6 @@ public class SimToolsTests
         Assert.Contains(output!.Slots, s => s.ItemName == "iron-plate" && s.Count >= 1);
 
         var hash = SimTools.ComputeStateHash();
-        Assert.True(hash.Hash != 0);   // 只是确认这个工具跑得通、返回非零值，不对拍具体数值
+        Assert.Matches("^0x[0-9A-F]{16}$", hash.Hash);   // 只是确认这个工具跑得通、格式正确，不对拍具体数值
     }
 }

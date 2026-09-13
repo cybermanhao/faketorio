@@ -16,4 +16,4 @@ public record InventoryInfo(int SlotCount, List<SlotInfo> Slots);
 
 public record PrototypeInfo(int Id, string Name, string TypeName);
 
-public record HashResult(ulong Hash);
+public record HashResult(string Hash);
