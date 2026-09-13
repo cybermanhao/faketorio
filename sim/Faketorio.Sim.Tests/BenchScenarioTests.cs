@@ -73,11 +73,13 @@ public class BenchScenarioTests
         Assert.Equal(GOLDEN_TICK_800, h1[799]);
     }
 
-    // re-baselined when RotateEntity landed —— Inserters/MiningDrills 的 WriteState
-    // 各多写一个 PendingRotation byte(排队转向,见 Inserters.SetPendingRotation /
-    // MiningDrills.SetPendingRotation)。determinism assert (h1 == h2) unaffected,
-    // only the pinned anchor moves.
-    private const ulong GOLDEN_TICK_800 = 6543756473640359196UL;
+    // re-baselined when Machines sleep/wake landed —— idle machines now stop
+    // running MachineTickPreSettle/PostSettle every tick (只做待机电力登记 +
+    // 60-tick 安全网取模判断),这改变了 tick-by-tick 的行为时序(哪一 tick
+    // 完成/唤醒),但不改变最终结果的正确性。determinism assert (h1 == h2)
+    // unaffected, only the pinned anchor moves. 见
+    // docs/superpowers/specs/2026-09-12-machines-sleep-wake-design.md §6。
+    private const ulong GOLDEN_TICK_800 = 5855795861733251759UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
