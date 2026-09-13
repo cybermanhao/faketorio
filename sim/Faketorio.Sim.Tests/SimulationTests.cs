@@ -1991,4 +1991,119 @@ public class SimulationTests
         while (sim.Inserters.GetHeldItemProtoId(insId) == 0 && tick < 100) { sim.Step(); tick++; }
         Assert.NotEqual(0, sim.Inserters.GetHeldItemProtoId(insId));
     }
+
+    [Fact]
+    public void TransferToEntity_WakesUpAsleepMachine_SameTick()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();   // 放置
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        sim.Step();   // 没原料 -> 熔炉 PreSettle 扫完配方仍是 -1 -> 睡
+        Assert.False(sim.Machines.IsAwake(furnaceId));
+
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        sim.Player.Inventory.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        sim.Submit(TransferTo(0, 2, oreId, 1));
+        sim.Step();   // TransferToEntity 在 Commands 阶段(整个 tick 最早)执行,
+                       // 早于本 tick 的 MachinesTickPreSettle,应该同 tick 就醒。
+
+        Assert.True(sim.Machines.IsAwake(furnaceId));
+    }
+
+    [Fact]
+    public void TransferFromEntity_WakesUpMachineBlockedOnFullOutput()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 0, 2));
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(0, 2);
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 1));
+        var outputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(furnaceId, 2));
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        int plateStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
+
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        sim.Machines.MarkAwake(furnaceId);   // 直接操纵库存,按测试约定显式唤醒(spec §5)
+        outputInv.Insert(plateId, plateStack, plateStack);   // 预填满输出槽
+
+        for (int t = 0; t < 200; t++) sim.Step();   // 完成一轮 -> 输出塞不下 -> 睡
+        Assert.False(sim.Machines.IsAwake(furnaceId));
+        Assert.Equal(0, inputInv.CountOf(oreId));            // 已经在完成时消耗
+
+        // 补一点新矿:熔炉的 clearRecipe=true 语义是"每轮从输入内容现推配方"——
+        // flush 成功后 RestartCycle 会立刻把配方清空,若这时输入库存仍是空的,
+        // MachineTickPreSettle 会在同一 tick 内(重新扫配方失败 -> 判睡)紧接着又把
+        // 它判回睡眠,盖过我们刚触发的唤醒,测试就没法验证"TransferFromEntity 触发
+        // 唤醒"这件事本身。补一份原料让它唤醒后确实有活干、能验证唤醒真的生效
+        // (brief 原始草稿没有这一步,这里是必要的修正)。
+        inputInv.Insert(oreId, 1, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+        sim.Submit(TransferFrom(0, 2, plateId, plateStack)); // 玩家手动搬走成品
+        sim.Step();
+
+        Assert.True(sim.Machines.IsAwake(furnaceId));
+    }
+
+    [Fact]
+    public void SetRecipe_WakesUpSleepingAssembler_SameTick()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 0, 0));
+        sim.Step();
+        var asmId = sim.World.GetEntityAt(0, 0);
+        sim.Step();   // 没配方 -> 睡
+        Assert.False(sim.Machines.IsAwake(asmId));
+
+        // 装配机的配方满足性检查(MachineTickPostSettle)和唤醒(SetRecipe 命令处理)
+        // 在同一 tick 内先后发生:先给够原料,SetRecipe 唤醒后 PostSettle 才不会因为
+        // 缺料又把它判回睡(这一步跟 brief 原始测试草稿不同——原始版本没垫原料,
+        // 装配机会在同一 tick 里被 SetRecipe 唤醒又被 MachineTickPostSettle 缺料判睡,
+        // 断言必然失败;这里补上原料让测试真正验证"SetRecipe 触发同 tick 唤醒"这件事)。
+        int gearRecipeId = sim.Prototypes.Get<RecipePrototype>("iron-gear-wheel").Id;
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+        var inputInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(asmId, 1));
+        inputInv.Insert(plateId, 2, sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize);
+        sim.Submit(SetRecipe(0, 0, gearRecipeId));
+        sim.Step();
+
+        Assert.True(sim.Machines.IsAwake(asmId));
+    }
+
+    [Fact]
+    public void Inserter_DropIntoMachineInput_WakesUpSleepingFurnace()
+    {
+        var sim = NewSim();
+        PlacePoweredMachineInfra(sim);
+        sim.Submit(PlaceFurnace(sim, 2, 2));
+        // insA at (1,2) rot=East feeds a wooden-chest's contents into the furnace input —
+        // 复用既有 Inserter_IntoFurnaceInput_UsesRole1 一带的布局风格:机械臂背后放一个
+        // 木箱塞满铁矿,机械臂负责把矿搬进熔炉输入。
+        sim.Submit(PlaceChest(sim, 0, 2));
+        sim.Submit(PlaceInserter(sim, 1, 2, rotation: 1));   // East:pickup(0,2) chest -> drop(2,2) furnace
+        sim.Step();
+
+        var furnaceId = sim.World.GetEntityAt(2, 2);
+        sim.Step();   // 没原料 -> 睡
+        Assert.False(sim.Machines.IsAwake(furnaceId));
+
+        var chestId = sim.World.GetEntityAt(0, 2);
+        int oreId = sim.Prototypes.Get<ItemPrototype>("iron-ore").Id;
+        sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId)).Insert(oreId, 5, sim.Prototypes.Get<ItemPrototype>("iron-ore").StackSize);
+
+        // 机械臂抓取 + 摆动 + 放件需要若干 tick(同既有机械臂测试的量级),
+        // 给够余量;一旦机械臂成功放件,MarkAwake 应该在同一 tick 内生效。
+        bool wokeUp = false;
+        for (int t = 0; t < 150 && !wokeUp; t++)
+        {
+            sim.Step();
+            wokeUp = sim.Machines.IsAwake(furnaceId);
+        }
+
+        Assert.True(wokeUp);
+    }
 }

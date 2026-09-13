@@ -399,6 +399,7 @@ public sealed class Simulation
                     && !CanAcceptMachineInput(eid, (CraftingMachinePrototype)targetProto!, command.ProtoId);
                 int inserted = blockedByFilter ? 0 : targetInv.Insert(command.ProtoId, amount, itemProto.StackSize);
                 Player.Inventory.Remove(command.ProtoId, inserted);
+                if (targetIsMachine && inserted > 0) Machines.MarkAwake(eid);
                 return;
             }
             case CommandType.TransferFromEntity:
@@ -435,6 +436,7 @@ public sealed class Simulation
                 int removed = sourceInv.Remove(command.ProtoId, amount2);
                 int inserted2 = Player.Inventory.Insert(command.ProtoId, removed, itemProto2.StackSize);
                 System.Diagnostics.Debug.Assert(inserted2 == removed, "TransferFromEntity: amount was pre-clamped to available space, insert should never partially fail");
+                if (sourceRole == 2 && removed > 0) Machines.MarkAwake(eid2);
                 return;
             }
             case CommandType.SetRecipe:
@@ -449,6 +451,7 @@ public sealed class Simulation
                     return;
                 }
                 Machines.SetRecipe(mid, command.ProtoId);
+                Machines.MarkAwake(mid);
                 return;
             }
             case CommandType.RotateEntity:
@@ -949,6 +952,7 @@ public sealed class Simulation
                         int itemId = inv[s].ItemProtoId;
                         inv.Remove(itemId, 1);
                         Inserters.Grab(id, itemId);
+                        if (role == 2) Machines.MarkAwake(pickEntity);
                         break;
                     }
                 }
@@ -991,7 +995,9 @@ public sealed class Simulation
                 if (invId.IsValid && (!dropIsMachine || CanAcceptMachineInput(dropEntity, (CraftingMachinePrototype)dp!, held)))
                 {
                     int stack = ((ItemPrototype)Prototypes.GetById(held)).StackSize;
-                    released = Inventories.Get(invId).Insert(held, 1, stack) > 0;
+                    int insertedCount = Inventories.Get(invId).Insert(held, 1, stack);
+                    released = insertedCount > 0;
+                    if (dropIsMachine && released) Machines.MarkAwake(dropEntity);
                 }
             }
             if (released) Inserters.Release(id);
