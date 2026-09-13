@@ -1386,6 +1386,10 @@ public class SimulationTests
         Assert.Equal(heldProgress, sim.MiningDrills.GetProgress(drillId)); // progress frozen
 
         chestInv.Remove(coal, coalStack); // free one slot
+        // Direct inventory manipulation bypasses the 3 real wake triggers (RotateEntity/
+        // TransferFromEntity/inserter grab) — explicitly wake the drill waiting on this
+        // output tile, per the established "direct inventory manipulation" test convention.
+        sim.MiningDrills.WakeWaitersAt(2, 2);
         sim.Step();
 
         Assert.False(sim.MiningDrills.IsCompleted(drillId));          // resumed
@@ -1826,6 +1830,11 @@ public class SimulationTests
         // (旧箱子腾位后仍剩不少煤,TotalItems() 不会归 0,用 IsCompleted 归 false 判断 flush 是否发生。)
         int totalBeforeFlush = oldOutInv.TotalItems();
         oldOutInv.Remove(coal, coalStack);
+        // Direct inventory manipulation bypasses the 3 real wake triggers (RotateEntity here
+        // only queues the pending rotation, it doesn't wake a completed drill by design) —
+        // explicitly wake the drill waiting on this output tile, per the established
+        // "direct inventory manipulation" test convention.
+        sim.MiningDrills.WakeWaitersAt(2, 2);
         tick = 0;
         while (sim.MiningDrills.IsCompleted(drillId) && tick < 50) { sim.Step(); tick++; }
         Assert.False(sim.MiningDrills.IsCompleted(drillId));               // flush 成功
