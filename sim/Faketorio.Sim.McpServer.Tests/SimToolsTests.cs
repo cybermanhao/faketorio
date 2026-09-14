@@ -392,4 +392,66 @@ public class SimToolsTests
         var hash = SimTools.ComputeStateHash();
         Assert.Matches("^0x[0-9A-F]{16}$", hash.Hash);   // 只是确认这个工具跑得通、格式正确，不对拍具体数值
     }
+
+    [Fact]
+    public void ResetSimulation_ClearsOperationLog()
+    {
+        SimTools.ResetSimulation(seed: 1);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole");
+
+        SimTools.ResetSimulation(seed: 2);   // 第二次 reset 应该清空第一次留下的历史
+
+        Assert.Empty(OperationLog.Entries);
+    }
+
+    [Fact]
+    public void ResetSimulation_RecordsSeedAndDataDir()
+    {
+        SimTools.ResetSimulation(seed: 42, dataDir: "data/base");
+
+        Assert.Equal(42, SimHost.Seed);
+        Assert.Equal("data/base", SimHost.DataDir);
+    }
+
+    [Fact]
+    public void SubmitCommand_Success_AppendsCommandToLog()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 3, y: 4, protoName: "small-electric-pole", rotation: 2);
+
+        var entry = Assert.Single(OperationLog.Entries);
+        Assert.False(entry.IsStep);
+        Assert.Equal(Faketorio.Sim.Commands.CommandType.PlaceEntity, entry.Command.Type);
+        Assert.Equal(3, entry.Command.X);
+        Assert.Equal(4, entry.Command.Y);
+        Assert.Equal((byte)2, entry.Command.Rotation);
+    }
+
+    [Fact]
+    public void Step_AppendsStepEntryToLog()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        SimTools.Step(ticks: 7);
+
+        var entry = Assert.Single(OperationLog.Entries);
+        Assert.True(entry.IsStep);
+        Assert.Equal(7, entry.StepTicks);
+    }
+
+    [Fact]
+    public void SubmitCommand_And_Step_AppendInOrder()
+    {
+        SimTools.ResetSimulation(seed: 1);
+
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole");
+        SimTools.Step(ticks: 3);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 0, protoName: "small-electric-pole");
+
+        Assert.Equal(3, OperationLog.Entries.Count);
+        Assert.False(OperationLog.Entries[0].IsStep);
+        Assert.True(OperationLog.Entries[1].IsStep);
+        Assert.False(OperationLog.Entries[2].IsStep);
+    }
 }

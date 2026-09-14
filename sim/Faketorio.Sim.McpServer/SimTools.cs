@@ -19,6 +19,9 @@ public static class SimTools
         string resolvedPath = Path.Combine(AppContext.BaseDirectory, dataDir);
         var prototypes = PrototypeLoader.LoadFromDirectory(resolvedPath);
         SimHost.Sim = new Simulation(prototypes, seed);
+        SimHost.Seed = seed;
+        SimHost.DataDir = dataDir;
+        OperationLog.Clear();
         return new ResetResult(SimHost.Sim.Tick, prototypes.Count);
     }
 
@@ -41,6 +44,7 @@ public static class SimTools
         int before = SimHost.Sim.RejectedCommandCount;
         for (int i = 0; i < ticks; i++) SimHost.Sim.Step();
         int after = SimHost.Sim.RejectedCommandCount;
+        OperationLog.RecordStep(ticks);
 
         return new StepResult(SimHost.Sim.Tick, after, after - before);
     }
@@ -94,7 +98,7 @@ public static class SimTools
             resolvedProtoId = matches[0].Id;
         }
 
-        SimHost.Sim.Submit(new Faketorio.Sim.Commands.Command
+        var submittedCommand = new Faketorio.Sim.Commands.Command
         {
             Type = commandType,
             ProtoId = resolvedProtoId,
@@ -102,7 +106,9 @@ public static class SimTools
             Y = y,
             Rotation = rotation,
             Count = count,
-        });
+        };
+        SimHost.Sim.Submit(submittedCommand);
+        OperationLog.RecordCommand(submittedCommand);
 
         return new SubmitResult(Queued: true);
     }

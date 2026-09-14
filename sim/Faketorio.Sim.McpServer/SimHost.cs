@@ -7,6 +7,8 @@ namespace Faketorio.Sim.McpServer;
 internal static class SimHost
 {
     public static Simulation? Sim;
+    public static long Seed;
+    public static string DataDir = "";
 }
 
 // 全部工具在 SimHost.Sim == null 时统一用这句话报错，保证错误文案一致
