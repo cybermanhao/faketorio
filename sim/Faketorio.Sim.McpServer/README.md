@@ -1,6 +1,6 @@
 # Faketorio.Sim.McpServer
 
-把 `Faketorio.Sim` 的 `Simulation.Submit`/`Step`/查询 API 包成 9 个 stdio MCP
+把 `Faketorio.Sim` 的 `Simulation.Submit`/`Step`/查询 API 包成 10 个 stdio MCP
 工具，供 Claude Code 在对话里直接驱动/探索 sim 层场景，不用写新 xUnit 测试
 再编译。
 
@@ -15,6 +15,7 @@
 - `resolve_prototype(name, typeName?)` —— 名字转原型 id。
 - `list_prototypes(typeNameFilter?)` —— 列出全部原型。
 - `compute_state_hash()` —— 算确定性哈希。
+- `get_screenshot(cameraX, cameraY, zoomPpt?, width?, height?)` —— 把当前模拟状态渲染成一张 PNG 截图返回。需要设置 `FAKETORIO_GODOT_EXE` 环境变量指向 Godot 可执行文件；每次调用会另起一个 Godot 子进程，有秒级延迟。
 
 ## 本地跑
 
@@ -27,7 +28,13 @@ dotnet run --project sim/Faketorio.Sim.McpServer
 按 Claude Code 当前的 MCP server 注册文档操作（配置文件路径/格式以官方文档
 为准，这里不重复维护一份容易过期的说明）。
 
-## 范围外
+## 截图能力的额外要求
 
-截图/渲染能力（驱动 Godot 截图）是独立的第二个子项目，还没开始——见
-`docs/superpowers/specs/2026-09-13-mcp-sim-driver-design.md` §0。
+`get_screenshot` 工具需要:
+1. 本机装有 Godot 4.5.1(Mono 版,支持 C#)。
+2. 环境变量 `FAKETORIO_GODOT_EXE` 指向 Godot 可执行文件的完整路径。
+3. `game/` 项目(截图用的渲染场景)跟这个 MCP server 项目在同一个仓库里,
+   相对路径关系固定——不要把这个 MCP server 单独拷贝部署到别的地方运行。
+
+截图截到的是 MCP server 这边操作历史重放出来的模拟状态,不是某个正在运行的
+真人游戏会话——细节见 `docs/superpowers/specs/2026-09-13-mcp-screenshot-design.md`。
