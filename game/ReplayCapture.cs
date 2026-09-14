@@ -27,6 +27,13 @@ public partial class ReplayCapture : Node
     {
         if (!_host.IsReplayMode) return;
 
+        if (_host.ReplayFailed)
+        {
+            GD.PushError("回放失败,放弃截图(不产出 PNG)。");
+            GetTree().Quit(2);
+            return;
+        }
+
         if (!_cameraPositioned)
         {
             double x = FindArgDouble("--camera-x", 0);

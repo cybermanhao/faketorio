@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Text.Json;
 using Godot;
@@ -18,6 +19,11 @@ public partial class SimHost : Node
     public Simulation Sim { get; private set; } = null!;
     public bool IsReplayMode { get; private set; }
 
+    /// 回放模式下 RunReplay 是否失败(异常/损坏日志/IO 错误)。ReplayCapture 靠这个
+    /// 标志区分"回放成功、Sim 状态可信"和"回放失败、Sim 可能是 null 或半初始化"，
+    /// 避免在后一种情况下截一张看起来正常但实际是空场景的错误截图。
+    public bool ReplayFailed { get; private set; }
+
     /// 距下一个 sim tick 的分数进度 [0,1)。v1 渲染不插值,留给后续。
     public double Alpha => _acc.Alpha;
 
@@ -31,7 +37,15 @@ public partial class SimHost : Node
         if (replayLogPath is not null)
         {
             IsReplayMode = true;
-            RunReplay(replayLogPath);
+            try
+            {
+                RunReplay(replayLogPath);
+            }
+            catch (Exception ex)
+            {
+                GD.PushError($"回放操作历史失败: {ex}");
+                ReplayFailed = true;
+            }
         }
         else
         {

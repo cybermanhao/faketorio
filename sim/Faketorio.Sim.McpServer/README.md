@@ -38,3 +38,7 @@ dotnet run --project sim/Faketorio.Sim.McpServer
 
 截图截到的是 MCP server 这边操作历史重放出来的模拟状态,不是某个正在运行的
 真人游戏会话——细节见 `docs/superpowers/specs/2026-09-13-mcp-screenshot-design.md`。
+
+`get_screenshot` 每次调用都会从 tick 0 重放完整操作历史,固定 30 秒超时；操作历史
+很长(几千条命令/step)的会话最终可能每次调用都超时,目前唯一的恢复手段是
+`reset_simulation`。

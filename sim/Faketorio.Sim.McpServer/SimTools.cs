@@ -198,10 +198,13 @@ public static class SimTools
         [Description("相机中心的世界 tile X 坐标")] double cameraX,
         [Description("相机中心的世界 tile Y 坐标")] double cameraY,
         [Description("缩放,每 tile 像素数,建议范围 6~64,默认 32")] double zoomPpt = 32,
-        [Description("输出图片宽度(像素),默认 1280")] int width = 1280,
-        [Description("输出图片高度(像素),默认 720")] int height = 720)
+        [Description("输出图片宽度(像素),会被限制在 320~1920 之间,默认 1280")] int width = 1280,
+        [Description("输出图片高度(像素),会被限制在 240~1080 之间,默认 720")] int height = 720)
     {
         if (SimHost.Sim is null) throw new ModelContextProtocol.McpException(NotReadyError.Message);
+
+        width = Math.Clamp(width, 320, 1920);
+        height = Math.Clamp(height, 240, 1080);
 
         string godotExe = Environment.GetEnvironmentVariable("FAKETORIO_GODOT_EXE")
             ?? throw new ModelContextProtocol.McpException(
@@ -221,6 +224,7 @@ public static class SimTools
         string outPath = Path.Combine(Path.GetTempPath(), $"faketorio-mcp-shot-{Guid.NewGuid():N}.png");
         try
         {
+            int entryCount = OperationLog.Entries.Count;
             File.WriteAllText(logPath, ReplayLogFormat.Serialize(OperationLog.Entries, SimHost.Seed, SimHost.DataDir));
 
             var psi = new ProcessStartInfo
@@ -267,7 +271,9 @@ public static class SimTools
             if (!proc.WaitForExit(30_000))
             {
                 proc.Kill(entireProcessTree: true);
-                throw new ModelContextProtocol.McpException("Godot 截图子进程超时(30 秒),已强制终止。");
+                throw new ModelContextProtocol.McpException(
+                    $"Godot 截图子进程超时(30 秒),已强制终止。本次重放了 {entryCount} 条操作历史记录——" +
+                    "如果操作历史很长,重放耗时会显著增加,可能是超时原因。");
             }
             if (proc.ExitCode != 0 || !File.Exists(outPath))
             {
