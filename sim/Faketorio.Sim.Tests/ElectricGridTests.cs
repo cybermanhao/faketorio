@@ -233,6 +233,47 @@ public class ElectricGridTests
     }
 
     [Fact]
+    public void RegisterDemand_CachedNetworkAssignment_InvalidatedWhenPoleRemoved()
+    {
+        // 性能优化(实体->NetworkId 缓存)的回归测试:第一次 RegisterDemand 会把 consumer
+        // 的网络归属缓存下来;拆掉唯一的杆(拓扑变化)后,同一个 consumer 再次
+        // RegisterDemand 必须重新算出"未覆盖",而不是继续读到拆杆前缓存的旧网络。
+        var grid = new ElectricGrid();
+        var pole = new EntityId(0, 1);
+        var consumer = new EntityId(5, 1);
+        grid.RegisterPole(pole, 0, 0, maximumWireDistanceTiles: 7, supplyAreaDistanceTiles: 5);
+
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 100);
+        grid.RegisterSupply(new EntityId(1, 1), 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 100);
+        grid.Settle();
+        Assert.Equal(Q16.One, grid.GetSatisfaction(consumer));   // 首次:缓存未命中,算出来有电
+
+        grid.UnregisterPole(pole);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 100);
+        grid.Settle();
+        Assert.Equal(Q16.Zero, grid.GetSatisfaction(consumer));   // 拓扑变了,不能继续读旧缓存
+    }
+
+    [Fact]
+    public void RegisterDemand_CachedNetworkAssignment_PicksUpNewlyPlacedPole()
+    {
+        // 反向场景:consumer 先在没有任何杆覆盖的坐标查询一次(缓存"未覆盖"),
+        // 之后新放一根杆覆盖到那个坐标(拓扑变化),再次查询必须能重新算出"已覆盖"。
+        var grid = new ElectricGrid();
+        var consumer = new EntityId(5, 1);
+
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 100);
+        grid.Settle();
+        Assert.Equal(Q16.Zero, grid.GetSatisfaction(consumer));   // 首次:未覆盖
+
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 7, supplyAreaDistanceTiles: 5);
+        grid.RegisterSupply(new EntityId(1, 1), 0, 0, UsagePriority.PrimaryOutput, maxJThisTick: 100);
+        grid.RegisterDemand(consumer, 0, 0, UsagePriority.PrimaryInput, amountJ: 100);
+        grid.Settle();
+        Assert.Equal(Q16.One, grid.GetSatisfaction(consumer));   // 新杆覆盖到了,不能继续读旧缓存
+    }
+
+    [Fact]
     public void ThreeProducersUnevenShare_AllocationsSumExactlyToUsed()
     {
         // 回归测试:3 个 Amount=1 的生产者同一档,tierCapacity=3,demand 只要 2 (used=2)。
