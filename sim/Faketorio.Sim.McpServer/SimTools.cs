@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using Faketorio.Sim.Prototypes;
 using ModelContextProtocol.Server;
@@ -191,4 +192,100 @@ public static class SimTools
         // （> 2^53 就不能保证按位相等），而这个工具存在的意义就是精确比较。
         return new HashResult($"0x{SimHost.Sim.ComputeStateHash():X16}");
     }
+
+    [McpServerTool, Description("把当前模拟状态渲染成一张 PNG 截图返回。会另起一个 Godot 子进程重放操作历史来渲染,有秒级延迟；需要设置 FAKETORIO_GODOT_EXE 环境变量指向 Godot 可执行文件")]
+    public static ModelContextProtocol.Protocol.ImageContentBlock GetScreenshot(
+        [Description("相机中心的世界 tile X 坐标")] double cameraX,
+        [Description("相机中心的世界 tile Y 坐标")] double cameraY,
+        [Description("缩放,每 tile 像素数,建议范围 6~64,默认 32")] double zoomPpt = 32,
+        [Description("输出图片宽度(像素),默认 1280")] int width = 1280,
+        [Description("输出图片高度(像素),默认 720")] int height = 720)
+    {
+        if (SimHost.Sim is null) throw new ModelContextProtocol.McpException(NotReadyError.Message);
+
+        string godotExe = Environment.GetEnvironmentVariable("FAKETORIO_GODOT_EXE")
+            ?? throw new ModelContextProtocol.McpException(
+                "没有设置 FAKETORIO_GODOT_EXE 环境变量——它必须指向 Godot 可执行文件的完整路径。");
+        if (!File.Exists(godotExe))
+            throw new ModelContextProtocol.McpException($"FAKETORIO_GODOT_EXE 指向的路径不存在: {godotExe}");
+
+        // game/ 和 sim/Faketorio.Sim.McpServer/ 都在仓库根目录下的兄弟目录,
+        // 相对关系固定,同 ResetSimulation 解析 dataDir 用的 AppContext.BaseDirectory
+        // 手法一致。
+        string gameProjectDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "game");
+        gameProjectDir = Path.GetFullPath(gameProjectDir);
+        if (!Directory.Exists(gameProjectDir))
+            throw new ModelContextProtocol.McpException($"找不到 game/ 项目目录(推算出的路径: {gameProjectDir})。");
+
+        string logPath = Path.Combine(Path.GetTempPath(), $"faketorio-mcp-replay-{Guid.NewGuid():N}.json");
+        string outPath = Path.Combine(Path.GetTempPath(), $"faketorio-mcp-shot-{Guid.NewGuid():N}.png");
+        try
+        {
+            File.WriteAllText(logPath, ReplayLogFormat.Serialize(OperationLog.Entries, SimHost.Seed, SimHost.DataDir));
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = godotExe,
+                UseShellExecute = false,
+                // 必须重定向子进程的标准输出/错误——不重定向的话,.NET 在 Windows 上
+                // 默认让子进程继承父进程(这个 MCP server 自己)的控制台句柄,Godot
+                // 自己的 stdout 输出会直接混进这个进程用来传 JSON-RPC 协议帧的 stdio
+                // 通道,破坏协议帧(跟 Program.cs 里关控制台日志 provider 是同一类
+                // 问题)。这里全部重定向到内存缓冲区丢弃/仅用于报错诊断,不再流向
+                // 父进程自己的 stdout。
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("--path");
+            psi.ArgumentList.Add(gameProjectDir);
+            psi.ArgumentList.Add("--position");
+            psi.ArgumentList.Add("-3000,-3000");
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add("--replay-log");
+            psi.ArgumentList.Add(logPath);
+            psi.ArgumentList.Add("--out");
+            psi.ArgumentList.Add(outPath);
+            psi.ArgumentList.Add("--camera-x");
+            psi.ArgumentList.Add(cameraX.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("--camera-y");
+            psi.ArgumentList.Add(cameraY.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("--zoom");
+            psi.ArgumentList.Add(zoomPpt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            psi.ArgumentList.Add("--width");
+            psi.ArgumentList.Add(width.ToString());
+            psi.ArgumentList.Add("--height");
+            psi.ArgumentList.Add(height.ToString());
+
+            using var proc = Process.Start(psi)
+                ?? throw new ModelContextProtocol.McpException("无法启动 Godot 子进程。");
+            // 必须在 WaitForExit 之前开始异步读取,否则子进程输出把重定向管道的
+            // 缓冲区写满后会阻塞在那里,while 这边又在同步等它退出——经典死锁。
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            // 重放+截图理论上应该在几秒内结束(spike 里 60 帧不到 1 秒),30 秒是
+            // 留了大量余量的上限,不是精确校准过的值。
+            if (!proc.WaitForExit(30_000))
+            {
+                proc.Kill(entireProcessTree: true);
+                throw new ModelContextProtocol.McpException("Godot 截图子进程超时(30 秒),已强制终止。");
+            }
+            if (proc.ExitCode != 0 || !File.Exists(outPath))
+            {
+                string stderrText = stderrTask.GetAwaiter().GetResult();
+                string stdoutText = stdoutTask.GetAwaiter().GetResult();
+                throw new ModelContextProtocol.McpException(
+                    $"Godot 截图子进程退出码 {proc.ExitCode},没有产出图片。stderr: {Truncate(stderrText)} stdout: {Truncate(stdoutText)}");
+            }
+
+            byte[] png = File.ReadAllBytes(outPath);
+            return ModelContextProtocol.Protocol.ImageContentBlock.FromBytes(png, "image/png");
+        }
+        finally
+        {
+            if (File.Exists(logPath)) File.Delete(logPath);
+            if (File.Exists(outPath)) File.Delete(outPath);
+        }
+    }
+
+    private static string Truncate(string s, int max = 2000) => s.Length <= max ? s : s[..max] + "...(truncated)";
 }
