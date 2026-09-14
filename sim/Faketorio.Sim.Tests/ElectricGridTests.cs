@@ -233,6 +233,47 @@ public class ElectricGridTests
     }
 
     [Fact]
+    public void UnionFind_PolesStraddlingBucketBoundary_StillConnect()
+    {
+        // 拓扑重建的空间索引化(把逐对 O(P²) 换成按 maxWireDistance 分桶,只跟
+        // 自己所在桶+周围 8 个邻居桶比较)的回归测试:两根杆 wireDistance=8,
+        // 分桶宽度也是 8,一根在 (0,0)(桶(0,0)),另一根在 (8,0)(桶(1,0))——
+        // 正好落在邻居桶而不是同一个桶里,必须依然能通过 3x3 邻居检查连通。
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 8, supplyAreaDistanceTiles: 2);
+        grid.RegisterPole(new EntityId(1, 1), 8, 0, maximumWireDistanceTiles: 8, supplyAreaDistanceTiles: 2);
+
+        Assert.Equal(grid.FindNetworkAt(0, 0), grid.FindNetworkAt(8, 0));
+    }
+
+    [Fact]
+    public void UnionFind_PolesTwoBucketsApartAndOutOfRange_NotConnected()
+    {
+        // 反向场景:两根杆隔了 2 个以上桶宽,且真实距离确实超出 wireDistance——
+        // 必须仍然判不连通(不能因为分桶就误连、也不能漏判"真的连不通")。
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 8, supplyAreaDistanceTiles: 2);
+        grid.RegisterPole(new EntityId(1, 1), 30, 0, maximumWireDistanceTiles: 8, supplyAreaDistanceTiles: 2);
+
+        Assert.NotEqual(grid.FindNetworkAt(0, 0), grid.FindNetworkAt(30, 0));
+    }
+
+    [Fact]
+    public void UnionFind_MixedWireDistances_UsesGlobalMaxForBucketingButMinForConnectivity()
+    {
+        // 混合 wireDistance 的杆:分桶宽度用全局最大值(这里是 20),但两杆是否真
+        // 连通仍然按 min(a,b) 判——一根杆 wireDistance 很大(20)但离得远的另一根
+        // 杆 wireDistance 很小(3),即便都落进彼此的桶邻居范围,也不能因为分桶
+        // 宽度大就误判连通。
+        var grid = new ElectricGrid();
+        grid.RegisterPole(new EntityId(0, 1), 0, 0, maximumWireDistanceTiles: 20, supplyAreaDistanceTiles: 2);
+        grid.RegisterPole(new EntityId(1, 1), 10, 0, maximumWireDistanceTiles: 3, supplyAreaDistanceTiles: 2);
+        // dist=10 > min(20,3)=3 -> 不连通,即使都在 20 分桶宽度下的邻居范围内
+
+        Assert.NotEqual(grid.FindNetworkAt(0, 0), grid.FindNetworkAt(10, 0));
+    }
+
+    [Fact]
     public void RegisterDemand_CachedNetworkAssignment_InvalidatedWhenPoleRemoved()
     {
         // 性能优化(实体->NetworkId 缓存)的回归测试:第一次 RegisterDemand 会把 consumer

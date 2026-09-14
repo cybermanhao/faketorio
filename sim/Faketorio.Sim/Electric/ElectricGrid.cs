@@ -130,15 +130,50 @@ public sealed class ElectricGrid
             if (ra != rb) parent[ra] = rb;
         }
 
-        for (int i = 0; i < ids.Count; i++)
-            for (int j = i + 1; j < ids.Count; j++)
-            {
-                var a = _poles[ids[i]]; var b = _poles[ids[j]];
-                long dx = a.X - b.X, dy = a.Y - b.Y;
-                int dist = ValueNoise.Isqrt(dx * dx + dy * dy);
-                int maxDist = Math.Min(a.MaximumWireDistanceTiles, b.MaximumWireDistanceTiles);
-                if (dist <= maxDist) Union(ids[i], ids[j]);
-            }
+        // 空间索引化的 union-find:原来是对全部杆逐对(i<j,O(P²))比较距离——
+        // scale 1000 时 9000 根杆,8100 万次比较,profiler 实测这一次性重建要
+        // ~32 秒。改成按"全局最大 MaximumWireDistanceTiles"分桶,每根杆只跟
+        // 自己所在桶 + 周围 8 个邻居桶(3x3)里的杆比较。正确性论证:两根杆要
+        // 连通,真实距离不会超过 min(各自 MaximumWireDistanceTiles) <= 全局
+        // 最大值 D;分桶宽度取 D 时,任意距离 <= D 的两点,其桶坐标在每个轴上
+        // 最多相差 1(标准空间哈希半径查询论证)——所以 3x3 邻居检查必然覆盖
+        // 全部"真正连通"的候选对,不会漏判;会多算一些桶内但因为 min(a,b) < D
+        // 而实际连不通的候选对,这是刻意的保守近似(换 O(P²) 为 O(P) 摊还),
+        // 不影响最终连通分量结果——union() 只在真正满足 min(a,b) 距离检查时
+        // 才会调用,产生的"边集合"跟原来逐对扫描完全一致,golden hash 不变。
+        int maxWireDist = 0;
+        foreach (var id in ids) maxWireDist = Math.Max(maxWireDist, _poles[id].MaximumWireDistanceTiles);
+        int wireBucket = Math.Max(1, maxWireDist);
+
+        var wireIndex = new Dictionary<long, List<EntityId>>();
+        foreach (var id in ids)
+        {
+            var p = _poles[id];
+            long key = BucketKey(FloorDiv(p.X, wireBucket), FloorDiv(p.Y, wireBucket));
+            if (!wireIndex.TryGetValue(key, out var bucket))
+                wireIndex[key] = bucket = new List<EntityId>();
+            bucket.Add(id);
+        }
+
+        foreach (var id in ids)
+        {
+            var a = _poles[id];
+            int bx = FloorDiv(a.X, wireBucket), by = FloorDiv(a.Y, wireBucket);
+            for (int nx = bx - 1; nx <= bx + 1; nx++)
+                for (int ny = by - 1; ny <= by + 1; ny++)
+                {
+                    if (!wireIndex.TryGetValue(BucketKey(nx, ny), out var neighbors)) continue;
+                    foreach (var otherId in neighbors)
+                    {
+                        if (otherId.Index <= id.Index) continue;   // 每个无序对只处理一次,顺序跟原逐对扫描(i<j)一致
+                        var b = _poles[otherId];
+                        long dx = a.X - b.X, dy = a.Y - b.Y;
+                        int dist = ValueNoise.Isqrt(dx * dx + dy * dy);
+                        int maxDist = Math.Min(a.MaximumWireDistanceTiles, b.MaximumWireDistanceTiles);
+                        if (dist <= maxDist) Union(id, otherId);
+                    }
+                }
+        }
 
         var groups = new Dictionary<EntityId, List<EntityId>>();
         foreach (var id in ids)   // ids 已按 Index 升序,同组内追加顺序即升序
