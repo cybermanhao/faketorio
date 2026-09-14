@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://CameraController.cs" id="1"]
 [ext_resource type="Script" path="res://BuildController.cs" id="2"]
 [ext_resource type="Script" path="res://WorldView.cs" id="3"]
 [ext_resource type="Script" path="res://PlayerInputController.cs" id="4"]
+[ext_resource type="Script" path="res://ReplayCapture.cs" id="5"]
 
 [node name="Main" type="Node2D"]
 
@@ -18,3 +19,6 @@ script = ExtResource("4")
 
 [node name="WorldView" type="Node2D" parent="."]
 script = ExtResource("3")
+
+[node name="ReplayCapture" type="Node" parent="."]
+script = ExtResource("5")
