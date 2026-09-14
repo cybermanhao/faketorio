@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using Godot;
 using Faketorio.Presentation.Core;
 using Faketorio.Sim;
@@ -15,6 +16,7 @@ public partial class SimHost : Node
     [Export] public long Seed = 20260906L;
 
     public Simulation Sim { get; private set; } = null!;
+    public bool IsReplayMode { get; private set; }
 
     /// 距下一个 sim tick 的分数进度 [0,1)。v1 渲染不插值,留给后续。
     public double Alpha => _acc.Alpha;
@@ -25,14 +27,79 @@ public partial class SimHost : Node
 
     public override void _Ready()
     {
-        Sim = new Simulation(PrototypeLoader.LoadFromDirectory(ResolveDataDir()), Seed);
-        SubmitStartupScene();
+        string? replayLogPath = FindArgValue("--replay-log");
+        if (replayLogPath is not null)
+        {
+            IsReplayMode = true;
+            RunReplay(replayLogPath);
+        }
+        else
+        {
+            Sim = new Simulation(PrototypeLoader.LoadFromDirectory(ResolveDataDir()), Seed);
+            SubmitStartupScene();
+        }
     }
 
     public override void _Process(double delta)
     {
+        // 回放模式下重放是同步一次性做完的(见 RunReplay),不需要实时推进——
+        // 实时推进反而会在截图之后继续跑,把已经对齐好的 tick 又往前推,
+        // 截出来的图就不是 MCP server 那边看到的那个精确状态了。
+        if (IsReplayMode) return;
         for (int n = _acc.Advance(delta); n-- > 0;) Sim.Step();
     }
+
+    // 从 `-- --key value --key2 value2 ...` 形式的用户自定义参数里取一个 key
+    // 对应的 value。找不到返回 null。
+    private static string? FindArgValue(string key)
+    {
+        string[] args = OS.GetCmdlineUserArgs();
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i] == key) return args[i + 1];
+        return null;
+    }
+
+    private void RunReplay(string logPath)
+    {
+        string json = File.ReadAllText(logPath);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        long seed = root.GetProperty("seed").GetInt64();
+        string dataDir = root.GetProperty("dataDir").GetString()!;
+
+        Sim = new Simulation(PrototypeLoader.LoadFromDirectory(ResolveDataDirFor(dataDir)), seed);
+
+        foreach (var entry in root.GetProperty("entries").EnumerateArray())
+        {
+            bool isStep = entry.GetProperty("isStep").GetBoolean();
+            if (isStep)
+            {
+                int ticks = entry.GetProperty("stepTicks").GetInt32();
+                for (int i = 0; i < ticks; i++) Sim.Step();
+            }
+            else
+            {
+                var cmd = entry.GetProperty("command");
+                Sim.Submit(new Command
+                {
+                    Type = (CommandType)cmd.GetProperty("type").GetInt32(),
+                    ProtoId = cmd.GetProperty("protoId").GetInt32(),
+                    X = cmd.GetProperty("x").GetInt32(),
+                    Y = cmd.GetProperty("y").GetInt32(),
+                    Rotation = (byte)cmd.GetProperty("rotation").GetInt32(),
+                    Count = cmd.GetProperty("count").GetInt32(),
+                });
+            }
+        }
+    }
+
+    // 回放模式下的 dataDir 是 MCP server 进程那边、相对于**它自己**可执行
+    // 文件目录解析出来的路径写进 log 文件的,在这个 Godot 进程里没有意义
+    // (两个进程的 AppContext.BaseDirectory 完全不同)——回放场景固定用
+    // ResolveDataDir() 这个 Godot 项目自己的既有解析逻辑,log 里的 dataDir
+    // 字段目前只是留作调试信息,不直接使用。
+    private static string ResolveDataDirFor(string _) => ResolveDataDir();
 
     // 编辑器/源码树运行时 res:// 就是 game/,数据在仓库根的 data/base。
     // 导出后 data/ 若被拷进 pck 就落在 res://data/base。两个都试。
