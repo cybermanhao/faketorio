@@ -93,6 +93,19 @@ public partial class CameraController : Node
         _ppt = System.Math.Clamp(_ppt * (dir > 0 ? 1.2 : 1.0 / 1.2), min, max);
     }
 
+    // 供截图回放流程调用:直接把相机摆到指定世界坐标 + 缩放,不走鼠标/键盘
+    // 输入。进 Free 模式(不受 Follow 的近景窄缩放区间限制),ppt 仍然按 Free
+    // 的 [FreeMinPpt, FreeMaxPpt] 夹一下,避免传入离谱的值渲染出全黑/全是
+    // 网格线的图。
+    public void SetCameraForScreenshot(double worldX, double worldY, double ppt)
+    {
+        Mode = CameraMode.Free;
+        _panning = false;
+        _snapping = false;
+        _centerTile = new Vector2((float)worldX, (float)worldY);
+        _ppt = System.Math.Clamp(ppt, FreeMinPpt, FreeMaxPpt);
+    }
+
     private Vector2 TargetTile()
     {
         var (sx, sy) = _followTarget?.WorldSub ?? (0L, 0L);
