@@ -320,4 +320,46 @@ public class PrototypeLoaderTests
     [Fact]
     public void InserterRotationTimeTooLarge_Throws() => AssertLoadThrows(
         "[{ \"type\": \"inserter\", \"name\": \"i\", \"rotationTimeSeconds\": 2000 }]");   // SecondsToTicks=120000 > 65536 -> FromRatio(1,120000).Raw == 0
+
+    [Fact]
+    public void CollisionInsetSubTiles_LoadsFromJson_DefaultsToZero()
+    {
+        var protos = PrototypeLoader.LoadFromDirectory("data/base");
+
+        // 显式配了的
+        Assert.Equal(128, protos.Get<TransportBeltPrototype>("transport-belt-basic").CollisionInsetSubTiles);
+        Assert.Equal(128, protos.Get<InserterPrototype>("inserter-basic").CollisionInsetSubTiles);
+        Assert.Equal(64,  protos.Get<MiningDrillPrototype>("electric-mining-drill").CollisionInsetSubTiles);
+        Assert.Equal(64,  protos.Get<FurnacePrototype>("stone-furnace").CollisionInsetSubTiles);
+        Assert.Equal(64,  protos.Get<FuelGeneratorPrototype>("burner-generator").CollisionInsetSubTiles);
+        Assert.Equal(96,  protos.Get<AssemblingMachinePrototype>("assembling-machine-1").CollisionInsetSubTiles);
+
+        // 没配的 → 0
+        Assert.Equal(0, protos.Get<ContainerPrototype>("wooden-chest").CollisionInsetSubTiles);
+        Assert.Equal(0, protos.Get<ElectricPolePrototype>("small-electric-pole").CollisionInsetSubTiles);
+    }
+
+    [Fact]
+    public void CollisionInsetSubTiles_Negative_ThrowsAtLoad()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "faketorio-neg-inset-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // 只放一个非法实体文件 + 其它必需类别的最小副本会很繁琐;直接复制 data/base 再覆盖一个文件。
+            foreach (var f in Directory.GetFiles("data/base", "*.json"))
+                File.Copy(f, Path.Combine(dir, Path.GetFileName(f)));
+            File.WriteAllText(Path.Combine(dir, "entities.json"),
+                "[{ \"type\": \"transport-belt\", \"name\": \"transport-belt-basic\", " +
+                "\"tileWidth\": 1, \"tileHeight\": 1, \"speedSubTilesPerTick\": 8, " +
+                "\"collisionInsetSubTiles\": -1 }]");
+
+            var ex = Assert.ThrowsAny<InvalidDataException>(() => PrototypeLoader.LoadFromDirectory(dir));
+            Assert.Contains("collisionInsetSubTiles", ex.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

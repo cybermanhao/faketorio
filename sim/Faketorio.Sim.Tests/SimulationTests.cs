@@ -2420,4 +2420,144 @@ public class SimulationTests
         Assert.True(grabTick >= 0);   // 机械臂确实从箱子里抓走了东西
         Assert.True(sim.MiningDrills.IsAwake(drillId));   // WakeWaitersAt 与抓取同一次 Step() 内生效
     }
+
+    // P16: 玩家碰撞盒 + 传送带带人移动 --------------------------------------
+
+    private const int St = Faketorio.Sim.Belts.BeltLine.TileSubTiles; // 256
+
+    [Fact]
+    public void Player_BlockedByChest_WholeStepReject()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 3, 0));
+        sim.Step();
+
+        // 玩家在 (2,0) 格中心,朝东走(chest inset 0 → 硬挡)
+        sim.Player.MoveTo(2 * St + St / 2, 0 * St + St / 2);
+        sim.Player.SetWalk(2); // 东
+        int x0 = sim.Player.X;
+        for (int t = 0; t < 20; t++) sim.Step();
+
+        // 没能走进 (3,0) 的占地:x 前沿始终 < 3*256
+        Assert.True(sim.Player.X < 3 * St, $"expected blocked before x=768, got {sim.Player.X}");
+        Assert.True(sim.Player.X > x0, $"expected the player to have advanced from x0={x0}, got {sim.Player.X}");
+    }
+
+    [Fact]
+    public void Player_WalksOntoBelt_AndDriftsWhenIdle()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 0, 1)); // 单格带,rot 1 = 东(Command.Rotation: 0/1/2/3 = 北/东/南/西;BeltNetwork.Delta(1)=(1,0))
+        sim.Step();
+
+        sim.Player.MoveTo(5 * St + St / 2, 0 * St + St / 2); // 站在带上
+        sim.Player.StopWalk();                                // 不走
+        int y0 = sim.Player.Y;
+
+        for (int t = 0; t < 10; t++) sim.Step();
+
+        // 每 tick 沿带方向漂移 carry(基础带 8);10 tick → +80 子格,Y 不变
+        Assert.Equal(5 * St + St / 2 + 10 * 8, sim.Player.X);
+        Assert.Equal(y0, sim.Player.Y);
+    }
+
+    [Fact]
+    public void Player_WalkingWithBelt_AddsCarry()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 0, 1)); // 东
+        sim.Step();
+        sim.Player.MoveTo(5 * St + St / 2, 0 * St + St / 2);
+        sim.Player.SetWalk(2); // 东,顺带
+        int x0 = sim.Player.X;
+        sim.Step();
+        Assert.Equal(x0 + 38 + 8, sim.Player.X); // walk 38 + carry 8
+    }
+
+    [Fact]
+    public void Player_WalkingAgainstBelt_NetSlower()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 0, 1)); // 东
+        sim.Step();
+        sim.Player.MoveTo(5 * St + St / 2, 0 * St + St / 2);
+        sim.Player.SetWalk(6); // 西,逆带
+        int x0 = sim.Player.X;
+        sim.Step();
+        Assert.Equal(x0 - 38 + 8, sim.Player.X); // -30:仍向西,但更慢
+    }
+
+    [Fact]
+    public void Player_Anchored_NotCarriedByBelt()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 5, 0, 1));
+        sim.Step();
+        sim.Player.MoveTo(5 * St + St / 2, 0 * St + St / 2);
+        sim.Player.StopWalk();
+        sim.Player.SetAnchored(true);
+        int x0 = sim.Player.X, y0 = sim.Player.Y;
+        for (int t = 0; t < 10; t++) sim.Step();
+        Assert.Equal(x0, sim.Player.X);
+        Assert.Equal(y0, sim.Player.Y);
+    }
+
+    [Fact]
+    public void Player_PassesThroughSeamBetweenTiledAssemblers()
+    {
+        var sim = NewSim();
+        // 两台 3×3 装配机,原点 (10,0) 与 (13,0) —— 密铺,东西相邻无 gap
+        sim.Submit(PlaceAssembler(sim, 10, 0));
+        sim.Submit(PlaceAssembler(sim, 13, 0));
+        sim.Step();
+
+        // 两机之间的 X 缝:A.box maxX = 13*256-96 = 3232;B.box minX = 13*256+96 = 3424。
+        // 缝中点 X = 13*256 = 3328。玩家在缝里,从南(y 大)往北(y 小)穿过 3×3 的整段高度。
+        int seamX = 13 * St;
+        sim.Player.MoveTo(seamX, 3 * St);     // 机器占 y∈[0,3),从 y=3*256 起(机器南边外)
+        sim.Player.SetWalk(0);                // 北
+        for (int t = 0; t < 60; t++) sim.Step();
+
+        // 穿过去了:y 前沿越过了机器北边 y=0
+        Assert.True(sim.Player.Y < 0, $"expected to pass the seam to y<0, got {sim.Player.Y}");
+        Assert.Equal(seamX, sim.Player.X);   // 没有横向漂移
+    }
+
+    [Fact]
+    public void Player_BlockedByAssemblerCenter()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 10, 0));
+        sim.Step();
+
+        // 正对机器几何中心那一列 (x = 10*256 + 3*128 = 2944) 从南往北走 → 被实心块挡
+        int centerX = 10 * St + 3 * St / 2;
+        sim.Player.MoveTo(centerX, 4 * St);
+        sim.Player.SetWalk(0); // 北
+        for (int t = 0; t < 60; t++) sim.Step();
+
+        // box: minY = 96, maxY = 3*256-96 = 672。玩家从 y=1024 往北,应停在 maxY(672) 前沿附近,不穿过。
+        Assert.True(sim.Player.Y >= 3 * St - 96, $"expected blocked at/after box maxY=672, got {sim.Player.Y}");
+        Assert.True(sim.Player.Y < 4 * St, $"expected the player to have advanced from y=1024, got {sim.Player.Y}");
+    }
+
+    [Fact]
+    public void PlayerCollisionBox_RightEdgeIsHalfOpen()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceAssembler(sim, 10, 0));
+        sim.Step();
+
+        // 装配机 (10,0) 3×3。碰撞盒 maxX = 13*256 - 96 = 3232,y 盒 [96, 672)。
+        // 半开:玩家能恰好停在 x == 3232,停不进 3231。
+        // 从东侧 x=3346 朝西走(每 tick -38):3308 -> 3270 -> 3232(恰在 maxX,不算撞,可停)
+        //   -> 下一步 3194 落入盒 -> 整步拒绝。最终停在 3232。
+        // 若判定误用 px <= maxX,则 3232 也算撞,玩家会停在 3270。
+        sim.Player.MoveTo(3232 + 38 * 3, 1 * St);   // (3346, 256)
+        sim.Player.SetWalk(6);                        // 西(八向 6 = 西)
+        for (int t = 0; t < 10; t++) sim.Step();
+
+        Assert.Equal(3232, sim.Player.X);
+        Assert.Equal(1 * St, sim.Player.Y);
+    }
 }

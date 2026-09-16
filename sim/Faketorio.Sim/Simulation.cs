@@ -200,11 +200,57 @@ public sealed class Simulation
 
     private void PlayerWalk()
     {
-        if (!Player.Walking) return;
-        var (dx, dy) = Player.WalkDelta(Player.WalkDir, _playerProto.WalkSpeedSubTilesPerTick);
-        int nx = Player.X + dx, ny = Player.Y + dy;
-        if (World.GetEntityAt(nx >> 8, ny >> 8).IsValid) return;   // 整步拒绝,不滑墙
+        // 1. 玩家自己的行走位移(不走路则 0)
+        int wdx = 0, wdy = 0;
+        if (Player.Walking)
+            (wdx, wdy) = Player.WalkDelta(Player.WalkDir, _playerProto.WalkSpeedSubTilesPerTick);
+
+        // 2. 传送带带人位移:玩家当前所在 tile 是传送带、且未锚定
+        int cdx = 0, cdy = 0;
+        if (!Player.Anchored)
+        {
+            // 子格 -> tile 用算术右移(负数也是向下取整,与 Simulation.cs:184 的 nx>>8 一致)
+            var lineId = Belts.GetLineAt(Player.X >> 8, Player.Y >> 8);
+            if (lineId.IsValid)
+            {
+                var line = Belts.GetLine(lineId);
+                var (bdx, bdy) = BeltNetwork.Delta(line.Direction);
+                int carry = ResolveBeltSpeed(line);
+                cdx = bdx * carry;
+                cdy = bdy * carry;
+            }
+        }
+
+        if (wdx == 0 && wdy == 0 && cdx == 0 && cdy == 0) return;
+
+        int nx = Player.X + wdx + cdx;
+        int ny = Player.Y + wdy + cdy;
+
+        if (PlayerPointBlocked(nx, ny)) return;   // 整步拒绝,不滑墙
         Player.MoveTo(nx, ny);
+    }
+
+    // 目标子格点 (px,py) 是否落在某实体的玩家碰撞盒内。
+    // CollisionInsetSubTiles >= 0 保证碰撞盒 ⊆ 占地,故点若在某盒内,该实体必占
+    // 点所在的那个 tile —— 只查 GetEntityAt(该 tile) 即可,无需扫相邻 tile。
+    private bool PlayerPointBlocked(int px, int py)
+    {
+        const int St = BeltLine.TileSubTiles;
+
+        var id = World.GetEntityAt(px >> 8, py >> 8);   // 算术右移 = 向下取整,负坐标也对
+        if (!id.IsValid) return false;
+
+        ref readonly var data = ref Entities.Get(id);
+        var proto = (EntityPrototype)Prototypes.GetById(data.ProtoId);
+        int inset = proto.CollisionInsetSubTiles;
+
+        long minX = (long)data.X * St + inset;
+        long maxX = (long)(data.X + proto.TileWidth) * St - inset;
+        long minY = (long)data.Y * St + inset;
+        long maxY = (long)(data.Y + proto.TileHeight) * St - inset;
+        if (minX >= maxX || minY >= maxY) return false;   // 碰撞盒为空 → 可通行
+
+        return px >= minX && px < maxX && py >= minY && py < maxY;
     }
 
     private void PlayerMine()

@@ -242,6 +242,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 MinableResult = GetString(el, "minableResult"),
                 MiningTimeTicks = Units.SecondsToTicks(GetDouble(el, "miningTimeSeconds", 0)),
                 InventorySize = GetInt(el, "inventorySize", 0),
@@ -251,6 +252,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 SpeedSubTilesPerTick = GetInt(el, "speedSubTilesPerTick", 0),
             }),
             "resource" => new ResourcePrototype
@@ -284,6 +286,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 MaximumWireDistanceTiles = GetInt(el, "maximumWireDistanceTiles", 0),
                 SupplyAreaDistanceTiles  = GetInt(el, "supplyAreaDistanceTiles", 0),
             }),
@@ -292,6 +295,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 PowerOutputJPerTick = el.TryGetProperty("powerOutput", out var po) ? Units.ParsePower(po.GetString()!) : 0L,
                 FuelItemName = el.GetProperty("fuelItemName").GetString()!,
             }),
@@ -300,6 +304,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 Category = el.GetProperty("category").GetString()!,
                 InputSlots = GetInt(el, "inputSlots", 0),
                 OutputSlots = GetInt(el, "outputSlots", 0),
@@ -310,6 +315,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 Category = el.GetProperty("category").GetString()!,
                 InputSlots = GetInt(el, "inputSlots", 0),
                 OutputSlots = GetInt(el, "outputSlots", 0),
@@ -320,6 +326,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var eu) ? Units.ParsePower(eu.GetString()!) : 0L,
             }),
             "inserter" => ValidateFootprint(new InserterPrototype
@@ -327,6 +334,7 @@ public static class PrototypeLoader
                 Name = name,
                 TileWidth = GetInt(el, "tileWidth", 1),
                 TileHeight = GetInt(el, "tileHeight", 1),
+                CollisionInsetSubTiles = GetInt(el, "collisionInsetSubTiles", 0),
                 EnergyUsageJPerTick = el.TryGetProperty("energyUsage", out var eu) ? Units.ParsePower(eu.GetString()!) : 0L,
                 RotationSpeed = Q16.FromRatio(1, Math.Max(1, Units.SecondsToTicks(GetDouble(el, "rotationTimeSeconds", 1.0)))),
             }),
@@ -370,6 +378,10 @@ public static class PrototypeLoader
             throw new InvalidDataException(
                 $"Entity prototype '{proto.Name}' has non-positive footprint " +
                 $"(tileWidth={proto.TileWidth}, tileHeight={proto.TileHeight})");
+        if (proto.CollisionInsetSubTiles < 0)
+            throw new InvalidDataException(
+                $"Entity prototype '{proto.Name}' has negative collisionInsetSubTiles " +
+                $"({proto.CollisionInsetSubTiles}) — 碰撞盒不能大于占地");
         return proto;
     }
 

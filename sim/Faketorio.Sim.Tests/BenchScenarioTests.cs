@@ -85,7 +85,13 @@ public class BenchScenarioTests
     // 问题——安全网唤醒改为从下一整 tick 起才真正生效(见 Simulation.cs
     // MachinesTickPreSettle/PostSettle 里的 _safetyNetWokenThisTick 跳过逻辑)。
     // 这是一次真实的、确定性的行为修正,tick-by-tick 结果因此改变,锚点需要再次移动。
-    private const ulong GOLDEN_TICK_800 = 6543756473640359196UL;
+    //
+    // 三次 re-baseline(P16 合并):Player.Anchored 入 WriteState(多一个 byte)+
+    // 玩家碰撞模型改动(点 vs 盒 + 传送带带人移动)。determinism 断言不受影响,
+    // 只有这个锚点值移动——合并后 main 的实际行为(P16 变化 + 合并前 main 上
+    // 已有的其它行为改动叠加)跟 P16 分支自己原来记的锚点不一样,用 dotnet test
+    // 实测的失败断言输出回填。
+    private const ulong GOLDEN_TICK_800 = 13313588121350948234UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
