@@ -265,11 +265,11 @@ public class SimulationTests
         }
         Assert.Equal(0, sim.Player.Inventory.CountOf(drillId));
 
-        sim.Submit(BuildFromInventory(sim, "electric-mining-drill", 0, -20));
+        sim.Submit(BuildFromInventory(sim, "electric-mining-drill", 0, -5));
         sim.Step();
 
         Assert.Equal(1, sim.RejectedCommandCount);
-        Assert.False(sim.World.GetEntityAt(0, -20).IsValid);
+        Assert.False(sim.World.GetEntityAt(0, -5).IsValid);
     }
 
     [Fact]
