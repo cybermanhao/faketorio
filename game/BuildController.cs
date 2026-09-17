@@ -16,15 +16,17 @@ public partial class BuildController : Node
 
     private SimHost _host = null!;
     private CameraController _cam = null!;
-    private int _chestProtoId;
+    private int _chestItemProtoId;
     private int _rejectedSeen;
     private double _flashRemaining;
+    private bool _demolishHeld;
+    private (int X, int Y) _demolishTile;
 
     public override void _Ready()
     {
         _host = GetNode<SimHost>("/root/SimHost");
         _cam = GetNode<CameraController>("../CameraController");
-        _chestProtoId = _host.Sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id;
+        _chestItemProtoId = _host.Sim.Prototypes.Get<ItemPrototype>("wooden-chest").Id;
         _rejectedSeen = _host.Sim.RejectedCommandCount;
     }
 
@@ -38,19 +40,37 @@ public partial class BuildController : Node
 
         if (_flashRemaining > 0) _flashRemaining -= delta;
         LastCommandRejected = _flashRemaining > 0;
+
+        UpdateDemolish();
     }
 
     public override void _UnhandledInput(InputEvent e)
     {
         if (e is not InputEventMouseButton mb || !mb.Pressed) return;
-        if (mb.ButtonIndex != MouseButton.Left && mb.ButtonIndex != MouseButton.Right) return;
+        if (mb.ButtonIndex != MouseButton.Left) return;
 
         var (x, y) = _cam.WorldXform.ScreenToTile(mb.Position.ToCore());
-        if (mb.ButtonIndex == MouseButton.Left)
-            _host.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = _chestProtoId, X = x, Y = y });
-        else
-            _host.Submit(new Command { Type = CommandType.RemoveEntity, X = x, Y = y });
+        _host.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = _chestItemProtoId, X = x, Y = y });
 
         GetViewport().SetInputAsHandled();
+    }
+
+    // 长按右键 = 拆除——复用手挖(MineStart/MineStop)同一套 sim 逻辑(距离检查 +
+    // 进度累积 + minableResult 物品归还),不新写机制,同 PlayerInputController.UpdateMining()。
+    private void UpdateDemolish()
+    {
+        bool held = Input.IsMouseButtonPressed(MouseButton.Right);
+        if (!held)
+        {
+            if (_demolishHeld) { _host.Submit(new Command { Type = CommandType.MineStop }); _demolishHeld = false; }
+            return;
+        }
+
+        if (!_demolishHeld || HoverTile != _demolishTile)
+        {
+            _host.Submit(new Command { Type = CommandType.MineStart, X = HoverTile.X, Y = HoverTile.Y });
+            _demolishHeld = true;
+            _demolishTile = HoverTile;
+        }
     }
 }
