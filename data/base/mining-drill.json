@@ -1,3 +1,4 @@
 [
-  { "type": "mining-drill", "name": "electric-mining-drill", "tileWidth": 2, "tileHeight": 2, "energyUsage": "90kW", "collisionInsetSubTiles": 64 }
+  { "type": "mining-drill", "name": "electric-mining-drill", "tileWidth": 2, "tileHeight": 2, "energyUsage": "90kW", "collisionInsetSubTiles": 64,
+    "minableResult": "electric-mining-drill", "miningTimeSeconds": 2.0 }
 ]

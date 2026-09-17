@@ -2,5 +2,10 @@
    "inventorySize": 60, "reachSubTiles": 1536, "walkSpeedSubTilesPerTick": 38, "craftQueueCap": 32,
    "startingInventory": [
      { "name": "iron-plate", "amount": 8 },
-     { "name": "wooden-chest", "amount": 1 }
+     { "name": "wooden-chest", "amount": 1 },
+     { "name": "electric-mining-drill", "amount": 1 },
+     { "name": "stone-furnace", "amount": 1 },
+     { "name": "burner-generator", "amount": 1 },
+     { "name": "small-electric-pole", "amount": 2 },
+     { "name": "coal", "amount": 20 }
    ] }]

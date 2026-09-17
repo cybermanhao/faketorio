@@ -5,5 +5,12 @@
   { "type": "item", "name": "wooden-chest", "stackSize": 50, "placeResult": "wooden-chest" },
   { "type": "item", "name": "copper-ore", "stackSize": 50 },
   { "type": "item", "name": "stone", "stackSize": 50 },
-  { "type": "item", "name": "iron-gear-wheel", "stackSize": 100 }
+  { "type": "item", "name": "iron-gear-wheel", "stackSize": 100 },
+  { "type": "item", "name": "electric-mining-drill", "stackSize": 50, "placeResult": "electric-mining-drill" },
+  { "type": "item", "name": "stone-furnace", "stackSize": 50, "placeResult": "stone-furnace" },
+  { "type": "item", "name": "assembling-machine-1", "stackSize": 50, "placeResult": "assembling-machine-1" },
+  { "type": "item", "name": "transport-belt-basic", "stackSize": 50, "placeResult": "transport-belt-basic" },
+  { "type": "item", "name": "inserter-basic", "stackSize": 50, "placeResult": "inserter-basic" },
+  { "type": "item", "name": "small-electric-pole", "stackSize": 50, "placeResult": "small-electric-pole" },
+  { "type": "item", "name": "burner-generator", "stackSize": 50, "placeResult": "burner-generator" }
 ]

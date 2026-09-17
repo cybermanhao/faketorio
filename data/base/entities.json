@@ -4,5 +4,6 @@
   { "type": "container", "name": "large-chest", "tileWidth": 2, "tileHeight": 3,
     "inventorySize": 48, "minableResult": "large-chest", "miningTimeSeconds": 1.0 },
   { "type": "transport-belt", "name": "transport-belt-basic", "tileWidth": 1, "tileHeight": 1,
-    "speedSubTilesPerTick": 8, "collisionInsetSubTiles": 128 }
+    "speedSubTilesPerTick": 8, "collisionInsetSubTiles": 128,
+    "minableResult": "transport-belt-basic", "miningTimeSeconds": 0.3 }
 ]

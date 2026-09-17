@@ -387,4 +387,59 @@ public class PrototypeLoaderTests
 
         Directory.Delete(dir, recursive: true);
     }
+
+    [Fact]
+    public void RealData_SevenBuildingItemsAndRecipesExist()
+    {
+        var registry = PrototypeLoader.LoadFromDirectory("data/base");
+        string[] names = {
+            "electric-mining-drill", "stone-furnace", "assembling-machine-1",
+            "transport-belt-basic", "inserter-basic", "small-electric-pole", "burner-generator",
+        };
+        foreach (var n in names)
+        {
+            var item = registry.Get<Faketorio.Sim.Prototypes.ItemPrototype>(n);
+            Assert.Equal(n, item.PlaceResult);
+            var recipe = registry.Get<Faketorio.Sim.Prototypes.RecipePrototype>(n);
+            Assert.Equal("crafting", recipe.Category);
+            Assert.NotEmpty(recipe.ResolvedResults);
+        }
+    }
+
+    [Fact]
+    public void RealData_SevenBuildingEntitiesHaveMinableResult()
+    {
+        var registry = PrototypeLoader.LoadFromDirectory("data/base");
+        Assert.Equal("electric-mining-drill",
+            registry.Get<Faketorio.Sim.Prototypes.MiningDrillPrototype>("electric-mining-drill").MinableResult);
+        Assert.Equal("stone-furnace",
+            registry.Get<Faketorio.Sim.Prototypes.FurnacePrototype>("stone-furnace").MinableResult);
+        Assert.Equal("assembling-machine-1",
+            registry.Get<Faketorio.Sim.Prototypes.AssemblingMachinePrototype>("assembling-machine-1").MinableResult);
+        Assert.Equal("transport-belt-basic",
+            registry.Get<Faketorio.Sim.Prototypes.TransportBeltPrototype>("transport-belt-basic").MinableResult);
+        Assert.Equal("inserter-basic",
+            registry.Get<Faketorio.Sim.Prototypes.InserterPrototype>("inserter-basic").MinableResult);
+        Assert.Equal("small-electric-pole",
+            registry.Get<Faketorio.Sim.Prototypes.ElectricPolePrototype>("small-electric-pole").MinableResult);
+        Assert.Equal("burner-generator",
+            registry.Get<Faketorio.Sim.Prototypes.FuelGeneratorPrototype>("burner-generator").MinableResult);
+    }
+
+    [Fact]
+    public void RealData_StartingInventoryIncludesStarterBuildings()
+    {
+        var sim = new Faketorio.Sim.Simulation(PrototypeLoader.LoadFromDirectory("data/base"));
+        var drillItem = sim.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("electric-mining-drill");
+        var furnaceItem = sim.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("stone-furnace");
+        var genItem = sim.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("burner-generator");
+        var poleItem = sim.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("small-electric-pole");
+        var coalItem = sim.Prototypes.Get<Faketorio.Sim.Prototypes.ItemPrototype>("coal");
+
+        Assert.Equal(1, sim.Player.Inventory.CountOf(drillItem.Id));
+        Assert.Equal(1, sim.Player.Inventory.CountOf(furnaceItem.Id));
+        Assert.Equal(1, sim.Player.Inventory.CountOf(genItem.Id));
+        Assert.Equal(2, sim.Player.Inventory.CountOf(poleItem.Id));
+        Assert.Equal(20, sim.Player.Inventory.CountOf(coalItem.Id));
+    }
 }

@@ -1,4 +1,5 @@
 [
   { "type": "inserter", "name": "inserter-basic", "tileWidth": 1, "tileHeight": 1,
-    "rotationTimeSeconds": 0.5, "energyUsage": "5kW", "collisionInsetSubTiles": 128 }
+    "rotationTimeSeconds": 0.5, "energyUsage": "5kW", "collisionInsetSubTiles": 128,
+    "minableResult": "inserter-basic", "miningTimeSeconds": 0.3 }
 ]
