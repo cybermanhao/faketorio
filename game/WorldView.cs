@@ -36,7 +36,7 @@ public partial class WorldView : Node2D
     // 玩家原型的 ReachSubTiles 是不可变值,_Ready 里读一次缓存,别每帧字符串查字典。
     private int _reachSubTiles;
 
-    // Debug 覆盖层(传送带 BeltLine 分割线 + lane gap 分布)开关,debug_toggle 键翻转。
+    // Debug 覆盖层(传送带 BeltLine 分割线 + lane gap 分布 + 实体碰撞盒线框)开关,debug_toggle 键翻转。
     private bool _debugOn;
 
     private readonly Dictionary<long, ResourceCell[]> _oreCache = new();
@@ -249,9 +249,14 @@ public partial class WorldView : Node2D
 
         // 9. Debug 覆盖层(debug_toggle 键翻转)—— 传送带内部结构:BeltLine 出口/入口
         // 分割横杠(按线循环上色,区分相邻但不同的逻辑线)+ 两条 lane 的 gap 分布
-        // (按 gap 下标循环上色,FFF-176 表示法一眼可见)。只读,不影响前面任何绘制。
+        // (按 gap 下标循环上色,FFF-176 表示法一眼可见)+ 实体的玩家碰撞盒线框
+        // (跟 Simulation.PlayerPointBlocked 用的是同一套公式,现算现画)。只读,
+        // 不影响前面任何绘制。
         if (_debugOn)
+        {
             DrawDebugBeltStructure(t, sim);
+            DrawDebugCollisionBoxes(t, sim, vis);
+        }
     }
 
     // 沿 rot(0/1/2/3 = N/E/S/W)方向画 3 个 ">" 雪佛龙。center 是 belt 格中心(屏幕像素)。
@@ -359,6 +364,36 @@ public partial class WorldView : Node2D
 
             DrawDebugLaneGaps(t, line.LaneA, exitX, exitY, dx, dy, nx, ny, laneOffsetTiles: -0.4);
             DrawDebugLaneGaps(t, line.LaneB, exitX, exitY, dx, dy, nx, ny, laneOffsetTiles: +0.4);
+        }
+    }
+
+    // 每个存活实体的玩家碰撞盒线框——跟 Simulation.PlayerPointBlocked 完全同一套公式
+    // (CollisionInsetSubTiles 收缩占地矩形),纯只读现算,不需要 sim 暴露任何新东西。
+    // inset 够大让盒子塌成空(比如传送带,让人能走上去)的实体天然不画,直接体现"不挡人"。
+    private void DrawDebugCollisionBoxes(WorldTransform t, Faketorio.Sim.Simulation sim, RectI vis)
+    {
+        const long St = WorldTransform.SubTilesPerTile;   // 256
+        var color = new Color(1f, 0.2f, 0.9f, 0.8f);       // 洋红,跟带结构的橙/黄系区分开
+
+        for (int i = 0; i < sim.Entities.Capacity; i++)
+        {
+            if (!sim.Entities.IsAliveAtIndex(i)) continue;
+            ref readonly var d = ref sim.Entities.GetAtIndex(i);
+            if (sim.Prototypes.GetById(d.ProtoId) is not EntityPrototype proto) continue;
+
+            int w = proto.TileWidth, h = proto.TileHeight;
+            if (d.X + w <= vis.MinX || d.X >= vis.MaxX || d.Y + h <= vis.MinY || d.Y >= vis.MaxY) continue;
+
+            int inset = proto.CollisionInsetSubTiles;
+            long minX = (long)d.X * St + inset;
+            long maxX = (long)(d.X + w) * St - inset;
+            long minY = (long)d.Y * St + inset;
+            long maxY = (long)(d.Y + h) * St - inset;
+            if (minX >= maxX || minY >= maxY) continue;   // 盒子退化(可行走),不画
+
+            var a = t.WorldSubToScreen(minX, minY).ToGodot();
+            var b = t.WorldSubToScreen(maxX, maxY).ToGodot();
+            DrawRect(new Rect2(a, b - a), color, false, 2f);
         }
     }
 

@@ -2444,6 +2444,24 @@ public class SimulationTests
     }
 
     [Fact]
+    public void Player_WalksFromOutsideOntoBelt_NotBlocked()
+    {
+        // P16 F5 验收时一度怀疑"走近传送带会被挡住"(后来查出是 Godot 编辑器
+        // 加载了过期构建,不是真 bug),但排查过程中发现已有的 belt-carry 测试
+        // 全部用 Player.MoveTo 直接把玩家传送到带上,从没测过"从相邻格子走进
+        // 带所在格"这个真实移动路径——这是个真实的覆盖缺口,补上。
+        var sim = NewSim();
+        sim.Submit(PlaceBelt(sim, 3, 0, 1)); // 带在 (3,0)
+        sim.Step();
+
+        sim.Player.MoveTo(2 * St + St / 2, 0 * St + St / 2); // 玩家在 (2,0) 格中心
+        sim.Player.SetWalk(2); // 朝东走向带
+        for (int t = 0; t < 20; t++) sim.Step();
+
+        Assert.True(sim.Player.X >= 3 * St, $"expected player to walk onto/through the belt tile at x>=768, got {sim.Player.X}");
+    }
+
+    [Fact]
     public void Player_WalksOntoBelt_AndDriftsWhenIdle()
     {
         var sim = NewSim();
