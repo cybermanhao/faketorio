@@ -362,4 +362,29 @@ public class PrototypeLoaderTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void MiningDrill_ParsesMinableResultAndMiningTime()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"proto-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "drill.json"), """
+            [{ "type": "mining-drill", "name": "test-drill", "tileWidth": 2, "tileHeight": 2,
+               "energyUsage": "10kW", "minableResult": "test-drill", "miningTimeSeconds": 2.5 }]
+            """);
+        File.WriteAllText(Path.Combine(dir, "item.json"), """
+            [{ "type": "item", "name": "test-drill", "stackSize": 50 }]
+            """);
+        File.WriteAllText(Path.Combine(dir, "player.json"), """
+            [{ "type": "player", "name": "player", "inventorySize": 10 }]
+            """);
+
+        var registry = PrototypeLoader.LoadFromDirectory(dir);
+        var drill = registry.Get<Faketorio.Sim.Prototypes.MiningDrillPrototype>("test-drill");
+
+        Assert.Equal("test-drill", drill.MinableResult);
+        Assert.Equal(150, drill.MiningTimeTicks);   // 2.5s * 60 ticks/s
+
+        Directory.Delete(dir, recursive: true);
+    }
 }
