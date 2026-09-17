@@ -19,7 +19,9 @@ public static class ScenarioSentinel
     public const int DefaultScaleEntities = 3051;
 
     // 实测 fed drill 数(4 * DefaultScale = 200 台采矿机里脚下有铁矿的台数)。
-    public const int MeasuredFedDrillCount = 26;
+    // Task 2 数据变更(添加 7 种建筑原型)导致全局 prototype ID 重新分配,
+    // 影响 ResourceGrid 的伪随机生成,改变了矿脉分布。新的实测值: 14。
+    public const int MeasuredFedDrillCount = 14;
 
     // 下界 = 实测值的 90%。噪声层是 seed 的纯函数,理论上一格不差;留 10%
     // 是给 data/base 里矿脉阈值的微调留余量,不是给"场景变了"留余量。

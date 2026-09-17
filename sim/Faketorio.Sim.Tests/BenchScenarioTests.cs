@@ -91,7 +91,7 @@ public class BenchScenarioTests
     // 只有这个锚点值移动——合并后 main 的实际行为(P16 变化 + 合并前 main 上
     // 已有的其它行为改动叠加)跟 P16 分支自己原来记的锚点不一样,用 dotnet test
     // 实测的失败断言输出回填。
-    private const ulong GOLDEN_TICK_800 = 13313588121350948234UL;
+    private const ulong GOLDEN_TICK_800 = 11349148617429990271UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()

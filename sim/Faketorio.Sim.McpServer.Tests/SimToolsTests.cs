@@ -103,15 +103,18 @@ public class SimToolsTests
     public void SubmitCommand_WithProtoName_PlacesSameEntityAsProtoId()
     {
         SimTools.ResetSimulation(seed: 1);
-        int furnaceId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.FurnacePrototype>("stone-furnace").Id;
+        // "large-chest" 只注册为 ContainerPrototype 一种类型（没有同名 item/recipe），
+        // 用来验证 protoName 解析路径本身，不受 Task 2 引入的 stone-furnace 同名
+        // item+recipe 歧义影响。
+        int chestId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ContainerPrototype>("large-chest").Id;
 
-        var result = SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "stone-furnace", rotation: 0);
+        var result = SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "large-chest", rotation: 0);
         SimTools.Step(ticks: 1);
 
         Assert.True(result.Queued);
         var placed = SimTools.Sim!.World.GetEntityAt(0, 0);
         Assert.True(placed.IsValid);
-        Assert.Equal(furnaceId, SimTools.Sim!.Entities.Get(placed).ProtoId);
+        Assert.Equal(chestId, SimTools.Sim!.Entities.Get(placed).ProtoId);
     }
 
     [Fact]
@@ -152,13 +155,15 @@ public class SimToolsTests
     public void GetEntityAt_AfterPlacingEntity_ReturnsInfo()
     {
         SimTools.ResetSimulation(seed: 1);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "stone-furnace", rotation: 2);
+        // "large-chest" 只注册为 ContainerPrototype 一种类型，protoName 不会因
+        // Task 2 引入的 item+recipe 同名而歧义（同 SubmitCommand_WithProtoName_PlacesSameEntityAsProtoId）。
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 5, y: 5, protoName: "large-chest", rotation: 2);
         SimTools.Step(ticks: 1);
 
         var result = SimTools.GetEntityAt(5, 5);
 
         Assert.NotNull(result);
-        Assert.Equal("stone-furnace", result!.ProtoName);
+        Assert.Equal("large-chest", result!.ProtoName);
         Assert.Equal(5, result.X);
         Assert.Equal(5, result.Y);
         Assert.Equal(2, result.Rotation);
@@ -235,11 +240,16 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 1);
 
-        var result = SimTools.ResolvePrototype("stone-furnace");
+        // "stone-furnace" 曾是单一匹配,但 Task 2 给它加了同名 item + recipe
+        // (建造成本机制:建筑现在有对应的可放置物品和配方),现在匹配 3 个类型
+        // (见 ResolvePrototype_WithTypeNameFilter_NarrowsMatch 用 typeName 过滤那种场景)。
+        // "large-chest" 在 data/base 里只注册为 ContainerPrototype 一种类型
+        // (没有同名 item/recipe),仍然是"单一匹配"这条行为的有效例子。
+        var result = SimTools.ResolvePrototype("large-chest");
 
         Assert.Single(result);
-        Assert.Equal("stone-furnace", result[0].Name);
-        Assert.Equal("FurnacePrototype", result[0].TypeName);
+        Assert.Equal("large-chest", result[0].Name);
+        Assert.Equal("ContainerPrototype", result[0].TypeName);
     }
 
     [Fact]
@@ -320,13 +330,17 @@ public class SimToolsTests
     [Fact]
     public void ComputeStateHash_SameSeedSameCommands_ProducesSameHash()
     {
+        // "stone-furnace" 现在同名歧义(见 ResolvePrototype_KnownName_ReturnsOneMatch
+        // 的注释),用 protoId 指定确切想要的 FurnacePrototype。同一份 data/base
+        // 下 protoId 是确定性的,跨 reset 不变,只需在第一次 reset 后取一次。
         SimTools.ResetSimulation(seed: 7);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoName: "stone-furnace", rotation: 0);
+        int furnaceProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.FurnacePrototype>("stone-furnace").Id;
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoId: furnaceProtoId, rotation: 0);
         SimTools.Step(ticks: 10);
         var hash1 = SimTools.ComputeStateHash();
 
         SimTools.ResetSimulation(seed: 7);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoName: "stone-furnace", rotation: 0);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 1, protoId: furnaceProtoId, rotation: 0);
         SimTools.Step(ticks: 10);
         var hash2 = SimTools.ComputeStateHash();
 
@@ -346,10 +360,17 @@ public class SimToolsTests
     {
         SimTools.ResetSimulation(seed: 0);
 
+        // "small-electric-pole"/"burner-generator" 现在同名歧义(Task 2 加了
+        // 同名 item+recipe,见 ResolvePrototype_KnownName_ReturnsOneMatch 的注释),
+        // 用 protoId 指定确切想要的实体原型。
+        int poleProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ElectricPolePrototype>("small-electric-pole").Id;
+        int generatorProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.FuelGeneratorPrototype>("burner-generator").Id;
+        int furnaceProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.FurnacePrototype>("stone-furnace").Id;
+
         // 电线杆 (0,0) + 发电机 (2,0)，同 SimulationTests.PlacePoweredMachineInfra
         // 的坐标关系。
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole", rotation: 0);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 2, y: 0, protoName: "burner-generator", rotation: 0);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoId: poleProtoId, rotation: 0);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 2, y: 0, protoId: generatorProtoId, rotation: 0);
         SimTools.Step(ticks: 1);
 
         // 给发电机塞煤——TransferToEntity 命令要求玩家背包里先有煤，
@@ -364,7 +385,7 @@ public class SimToolsTests
         SimTools.Step(ticks: 1);
 
         // 熔炉 (0,2)，在电线杆 Chebyshev 距离 2 以内。
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 2, protoName: "stone-furnace", rotation: 0);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 2, protoId: furnaceProtoId, rotation: 0);
         SimTools.Step(ticks: 1);
 
         var furnace = SimTools.GetEntityAt(0, 2);
@@ -397,7 +418,10 @@ public class SimToolsTests
     public void ResetSimulation_ClearsOperationLog()
     {
         SimTools.ResetSimulation(seed: 1);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole");
+        // "small-electric-pole" 现在同名歧义(见 ResolvePrototype_KnownName_ReturnsOneMatch
+        // 的注释);这条测试只关心 OperationLog 有没有条目,用 protoId 避开歧义检查。
+        int poleProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ElectricPolePrototype>("small-electric-pole").Id;
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoId: poleProtoId);
 
         SimTools.ResetSimulation(seed: 2);   // 第二次 reset 应该清空第一次留下的历史
 
@@ -417,8 +441,11 @@ public class SimToolsTests
     public void SubmitCommand_Success_AppendsCommandToLog()
     {
         SimTools.ResetSimulation(seed: 1);
+        // "small-electric-pole" 现在同名歧义(见 ResolvePrototype_KnownName_ReturnsOneMatch
+        // 的注释);这条测试只关心日志条目内容,用 protoId 避开歧义检查。
+        int poleProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ElectricPolePrototype>("small-electric-pole").Id;
 
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 3, y: 4, protoName: "small-electric-pole", rotation: 2);
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 3, y: 4, protoId: poleProtoId, rotation: 2);
 
         var entry = Assert.Single(OperationLog.Entries);
         Assert.False(entry.IsStep);
@@ -444,10 +471,13 @@ public class SimToolsTests
     public void SubmitCommand_And_Step_AppendInOrder()
     {
         SimTools.ResetSimulation(seed: 1);
+        // "small-electric-pole" 现在同名歧义(见 ResolvePrototype_KnownName_ReturnsOneMatch
+        // 的注释);这条测试只关心日志顺序,用 protoId 避开歧义检查。
+        int poleProtoId = SimTools.Sim!.Prototypes.Get<Faketorio.Sim.Prototypes.ElectricPolePrototype>("small-electric-pole").Id;
 
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoName: "small-electric-pole");
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 0, y: 0, protoId: poleProtoId);
         SimTools.Step(ticks: 3);
-        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 0, protoName: "small-electric-pole");
+        SimTools.SubmitCommand(type: "PlaceEntity", x: 1, y: 0, protoId: poleProtoId);
 
         Assert.Equal(3, OperationLog.Entries.Count);
         Assert.False(OperationLog.Entries[0].IsStep);

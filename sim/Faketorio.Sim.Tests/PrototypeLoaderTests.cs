@@ -194,7 +194,7 @@ public class PrototypeLoaderTests
         var p = Load().Get<PlayerPrototype>("player");
         Assert.Equal(60, p.InventorySize);
         Assert.Equal(1536, p.ReachSubTiles);
-        Assert.Equal(2, p.StartingInventory.Count);
+        Assert.Equal(7, p.StartingInventory.Count);
         Assert.Equal("iron-plate", p.StartingInventory[0].Name);
     }
 

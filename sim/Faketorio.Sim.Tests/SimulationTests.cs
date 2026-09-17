@@ -695,10 +695,23 @@ public class SimulationTests
         int ironPlate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
         int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
 
-        // 玩家背包 60 槽,起始物品(8 个铁板的半满槽 + 1 把木箱的槽)占 2 槽。
-        // 补满那个半满槽(92 个)再填满剩下 58 个空槽中的 57 个(57*100),
-        // 精确留 1 个空槽——只够装 1 组煤(50)。
-        sim.Player.Inventory.Insert(ironPlate, (ironStack - 8) + 57 * ironStack, ironStack);
+        // 玩家背包 60 槽。Task 2 扩充了开局物资包(data/base/player.json):
+        // iron-plate x8、wooden-chest x1、electric-mining-drill x1、stone-furnace x1、
+        // burner-generator x1、small-electric-pole x2、coal x20 —— 7 种不同物品各占
+        // 一槽,起始就占用 7 槽(不再是旧版的 2 槽),其中 coal 槽是半满的(20/50,
+        // 还有 30 个空间)。
+        //
+        // 关键点:Inventory.Insert 先补同类未满槽(第一轮),再占空槽(第二轮)——
+        // 玩家现在已经有一个半满的 coal 槽,后面转移煤时这个槽会先被吃掉一部分,
+        // 不能再假设"转移进来的煤全部落在新的空槽里"。
+        //
+        // 为了让这条测试仍然精确覆盖"转移量超过玩家能吃下的量,多出的留在箱子里"
+        // 这条行为,这里把铁板灌到刚好填满*所有*空槽(53 个)外加那个半满的铁板槽
+        // (60 - 7 起始槽 = 53 个空槽;补满半满槽需要 100-8=92,再填满 53 个满槽需要
+        // 53*100),让玩家背包里除了那个半满的 coal 槽以外,再没有任何空间——
+        // 这样转移煤时第二轮(占空槽)完全没有名额,只有第一轮(补 coal 半满槽的
+        // 30 个空间)能接收。
+        sim.Player.Inventory.Insert(ironPlate, (ironStack - 8) + 53 * ironStack, ironStack);
 
         sim.Submit(PlaceChest(sim, 5, 0));
         sim.Step();
@@ -713,8 +726,10 @@ public class SimulationTests
         int totalAfter = sim.Player.Inventory.CountOf(coal) + chestInv.CountOf(coal);
         Assert.Equal(0, sim.RejectedCommandCount);
         Assert.Equal(totalBefore, totalAfter);              // 一个都没凭空消失
-        Assert.Equal(50, sim.Player.Inventory.CountOf(coal));  // 只搬了玩家吃得下的 50 个
-        Assert.Equal(30, chestInv.CountOf(coal));              // 箱子里剩下搬不走的 30 个
+        // 玩家原有 20 个煤(半满槽,空间 30)+ 第一轮吃满这 30 个空间 = 50;
+        // 没有空槽可用,第二轮拿不到名额,超出的 50 个留在箱子里(80-30=50)。
+        Assert.Equal(50, sim.Player.Inventory.CountOf(coal));  // 20(起始) + 30(补满半满槽)
+        Assert.Equal(50, chestInv.CountOf(coal));              // 80 - 30 = 50,箱子里剩下搬不走的部分
     }
 
     private static Command PlaceFurnace(Simulation sim, int x, int y) => new()
@@ -1055,6 +1070,28 @@ public class SimulationTests
         sim.Step();
     }
 
+    // Task 2 数据变更(7 种建筑原型加入注册表)让 PrototypeRegistry.AssignIds() 的全局
+    // 排序结果整体偏移,ResourceGrid 的伪随机矿脉生成跟着 ResourcePrototype.Id 走,
+    // 分布随之改变(同 ScenarioSentinel.MeasuredFedDrillCount 那条根因说明)——原来写死
+    // 的 "drill 在 (0,2) 脚下有矿" 不再成立。用这个探测手法代替:在 pole(0,0) 供电范围内
+    // (Chebyshev 距离 2,2x2 footprint 完整落在范围内)搜第一个满足 minOreTiles 的位置,
+    // 复用 MiningDrill_FindsResourceInFootprint_AndExtractsToOutputChest / Exhausted 那两条
+    // 测试已经用过的搜索模式,不是新发明一套。
+    private static (int X, int Y) FindPoweredOreOrigin(Simulation sim, int minOreTiles = 1)
+    {
+        for (int ty = -2; ty <= 1; ty++)
+            for (int tx = -1; tx <= 1; tx++)
+            {
+                int oreTiles = 0;
+                for (int dy = 0; dy < 2; dy++)
+                    for (int dx = 0; dx < 2; dx++)
+                        if (!sim.Resources.GetResourceAt(tx + dx, ty + dy).IsEmpty) oreTiles++;
+                if (oreTiles >= minOreTiles) return (tx, ty);
+            }
+        throw new InvalidOperationException(
+            $"could not find a 2x2 area with >= {minOreTiles} ore tile(s) under the default seed within powered region");
+    }
+
     [Fact]
     public void MiningDrill_FindsResourceInFootprint_AndExtractsToOutputChest()
     {
@@ -1062,24 +1099,37 @@ public class SimulationTests
         PlacePoweredDrillInfra(sim);
         // Drill origin must stay within the pole's supplyAreaDistanceTiles (2, Chebyshev,
         // measured from the entity's placement-time (X,Y) origin — see ElectricGrid).
-        // Pole is at (0,0), so (0,2) is right at the boundary; (0,3) would be unpowered.
-        // 采矿机 2x2 footprint 占 (0,2)-(1,3),朝东(rotation=1)输出到 (2,2)。
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
-        sim.Submit(PlaceChest(sim, 2, 2));
+        // Pole is at (0,0), so drill must be within Chebyshev distance 2.
+        // Task 2 data变更影响 resource id,导致矿脉分布改变,需要搜索新的有矿坐标。
+        // 采矿机 2x2 footprint,朝东(rotation=1)输出到东方 2 格处。
+        int drillX = 0, drillY = 0;
+        bool foundOreLocation = false;
+        // 在 pole 的供电范围内搜索有矿的 2x2 区域
+        for (int ty = -2; ty <= 1 && !foundOreLocation; ty++) {
+            for (int tx = -1; tx <= 1 && !foundOreLocation; tx++) {
+                bool hasOre = false;
+                for (int dy = 0; dy < 2 && !hasOre; dy++) {
+                    for (int dx = 0; dx < 2 && !hasOre; dx++) {
+                        if (!sim.Resources.GetResourceAt(tx + dx, ty + dy).IsEmpty) hasOre = true;
+                    }
+                }
+                if (hasOre) {
+                    drillX = tx;
+                    drillY = ty;
+                    foundOreLocation = true;
+                }
+            }
+        }
+        Assert.True(foundOreLocation, "could not find a 2x2 area with ore under the default seed within powered region");
+
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        // Resources 是惰性生成的矿脉——用固定种子(NewSim 默认种子 0)读一遍 (0,2)-(1,3)
-        // 范围,找到实际有矿的格再断言(矿脉分布是种子的确定函数,不是本测试要验证的东西;
-        // 这里只需要确认"某个格有矿、采矿机能找到它、挖出对应物品、堆进箱子"这条流程通)。
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-
-        bool foundResource = false;
-        for (int dy = 0; dy < 2 && !foundResource; dy++)
-            for (int dx = 0; dx < 2 && !foundResource; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
-        Assert.True(foundResource, "test assumes the default seed puts at least one resource tile under (0,2)-(1,3) — if this fails, adjust the drill's placement coordinates to a spot the seeded map actually has ore under.");
 
         for (int t = 0; t < 200; t++) sim.Step();
 
@@ -1123,21 +1173,17 @@ public class SimulationTests
         PlacePoweredDrillInfra(sim);
         // Same footprint/power reasoning as the chest test above: drill origin must stay
         // within the pole's supplyAreaDistanceTiles (2, Chebyshev, from (0,0)).
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1)); // 朝东输出到 (2,2)
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1)); // 朝东输出到 (drillX+2, drillY)
+        int beltX = drillX + 2, beltY = drillY;
         sim.Submit(new Command { Type = CommandType.PlaceEntity,
             ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
-            X = 2, Y = 2, Rotation = 1 });
+            X = beltX, Y = beltY, Rotation = 1 });
         sim.Step();
-
-        bool foundResource = false;
-        for (int dy = 0; dy < 2 && !foundResource; dy++)
-            for (int dx = 0; dx < 2 && !foundResource; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
-        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
 
         for (int t = 0; t < 200; t++) sim.Step();
 
-        var lineId = sim.Belts.GetLineAt(2, 2);
+        var lineId = sim.Belts.GetLineAt(beltX, beltY);
         Assert.True(lineId.IsValid);
         var line = sim.Belts.GetLine(lineId);
         bool hasItem = line.LaneA.Count > 0 || line.LaneB.Count > 0;
@@ -1149,14 +1195,16 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东输出到 (drillX+2, drillY)
+        int beltX = drillX + 2, beltY = drillY;
         sim.Submit(new Command { Type = CommandType.PlaceEntity,
             ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
-            X = 2, Y = 2, Rotation = 1 });                          // 带也向东 -> 平行
+            X = beltX, Y = beltY, Rotation = 1 });                  // 带也向东 -> 平行
         sim.Step();
         for (int t = 0; t < 200; t++) sim.Step();
 
-        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(beltX, beltY));
         Assert.True(line.LaneB.Count > 0, "平行进料应落右侧 LaneB");
         Assert.Equal(0, line.LaneA.Count);                          // 不回退到另一条
     }
@@ -1166,14 +1214,16 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东输出到 (drillX+2, drillY)
+        int beltX = drillX + 2, beltY = drillY;
         sim.Submit(new Command { Type = CommandType.PlaceEntity,
             ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
-            X = 2, Y = 2, Rotation = 2 });                          // 带向南 -> 与"朝东"正交
+            X = beltX, Y = beltY, Rotation = 2 });                  // 带向南 -> 与"朝东"正交
         sim.Step();
         for (int t = 0; t < 200; t++) sim.Step();
 
-        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(beltX, beltY));
         // 带向南行进,右手法线 = 西;采矿机在带西侧往东怼 -> 远端在东 = 左侧 LaneA。
         Assert.True(line.LaneA.Count > 0, "正交进料应落远端 LaneA");
         Assert.Equal(0, line.LaneB.Count);
@@ -1184,26 +1234,22 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));              // 朝东输出到 (2,2)
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东输出到 (drillX+2, drillY)
+        int beltX = drillX + 2, beltY = drillY;
         sim.Submit(new Command { Type = CommandType.PlaceEntity,
             ProtoId = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id,
-            X = 2, Y = 2, Rotation = 1 });                          // 单格带,无下游消费者
+            X = beltX, Y = beltY, Rotation = 1 });                  // 单格带,无下游消费者
         sim.Step();
 
-        bool foundResource = false;
-        for (int dy = 0; dy < 2 && !foundResource; dy++)
-            for (int dx = 0; dx < 2 && !foundResource; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
-        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
-
-        var drillId = sim.World.GetEntityAt(0, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
 
         // 单格带长 256 subtiles,每个物品占 64 subtiles -> 单条 lane 最多塞 4 个。
         // 没有下游消费者,跑够久之后这条 lane 必然被喂满,TryInsertAtBack 之后
         // 每次都失败——这正是"堵在传送带里"的稳态。
         for (int t = 0; t < 600; t++) sim.Step();
 
-        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(2, 2));
+        var line = sim.Belts.GetLine(sim.Belts.GetLineAt(beltX, beltY));
         int itemsOnLine = line.LaneA.Count + line.LaneB.Count;
         Assert.True(itemsOnLine > 0, "expected the belt lane to have received at least one item");
 
@@ -1262,15 +1308,16 @@ public class SimulationTests
         PlacePoweredDrillInfra(sim);
         // (50,50) 起的 2x2 区域:若碰巧有矿,换一个更偏远的坐标直到全空(矿脉是无限惰性生成,
         // 但任意固定 2x2 区域全空的概率不为零——用一个大坐标降低撞上矿脉密集区的概率)。
-        sim.Submit(PlaceDrill(sim, 5000, 5000, rotation: 1));
+        // Task 2 添加建筑原型导致 resource id 变化,影响伪随机生成。坐标更新为 (10000,10000)。
+        sim.Submit(PlaceDrill(sim, 10000, 10000, rotation: 1));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(5000, 5000);
+        var drillId = sim.World.GetEntityAt(10000, 10000);
         bool anyResource = false;
         for (int dy = 0; dy < 2; dy++)
             for (int dx = 0; dx < 2; dx++)
-                if (!sim.Resources.GetResourceAt(5000 + dx, 5000 + dy).IsEmpty) anyResource = true;
-        Assert.False(anyResource, "test assumes (5000,5000)-(5001,5001) has no ore under the default seed — pick a different far-away coordinate if this ever becomes false");
+                if (!sim.Resources.GetResourceAt(10000 + dx, 10000 + dy).IsEmpty) anyResource = true;
+        Assert.False(anyResource, "test assumes (10000,10000)-(10001,10001) has no ore under the default seed — pick a different far-away coordinate if this ever becomes false");
 
         for (int t = 0; t < 50; t++) sim.Step();
 
@@ -1304,12 +1351,15 @@ public class SimulationTests
     public void MiningDrill_LockedTargetEmptiedExternally_DoesNotThrow_ReTargets()
     {
         var sim = NewSim();
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1)); // no power infra — unpowered on purpose
+        // (-1,-2) 是默认种子下靠近原点、稳定有矿的 2x2 区域(同其它 MiningDrill_* 测试
+        // 用 FindPoweredOreOrigin 探测出的同一块矿——这条测试特意不接电,不需要走
+        // 供电范围搜索,直接复用这个已知坐标)。
+        sim.Submit(PlaceDrill(sim, -1, -2, rotation: 1)); // no power infra — unpowered on purpose
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
+        var drillId = sim.World.GetEntityAt(-1, -2);
         int tx = sim.MiningDrills.GetTargetX(drillId), ty = sim.MiningDrills.GetTargetY(drillId);
-        Assert.NotEqual(-1, tx); // seed 0 has ore under (0,2)-(1,3); drill locks it regardless of power
+        Assert.NotEqual(-1, tx); // default seed has ore under (-1,-2)-(0,-1); drill locks it regardless of power
 
         var locked = sim.Resources.GetResourceAt(tx, ty);
         sim.Resources.Extract(tx, ty, locked.Amount); // someone else empties the locked tile
@@ -1325,19 +1375,17 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
-        sim.Submit(PlaceChest(sim, 2, 2));
+        // 需要 >=2 个矿格,保证挖空第一个目标后 footprint 内还有第二个可重新锁定。
+        var (drillX, drillY) = FindPoweredOreOrigin(sim, minOreTiles: 2);
+
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-
-        int oreTiles = 0;
-        for (int dy = 0; dy < 2; dy++)
-            for (int dx = 0; dx < 2; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) oreTiles++;
-        Assert.True(oreTiles >= 2, "test needs >=2 resource tiles under (0,2)-(1,3) for the default seed — move the drill to a denser ore spot if this fails.");
 
         int firstTx = sim.MiningDrills.GetTargetX(drillId), firstTy = sim.MiningDrills.GetTargetY(drillId);
         Assert.NotEqual(-1, firstTx);
@@ -1351,8 +1399,8 @@ public class SimulationTests
         int newTx = sim.MiningDrills.GetTargetX(drillId), newTy = sim.MiningDrills.GetTargetY(drillId);
         Assert.NotEqual(-1, newTx);                                     // didn't get stuck idle
         Assert.False(newTx == firstTx && newTy == firstTy);             // moved off the exhausted tile
-        Assert.InRange(newTx, 0, 1);                                    // still inside the 2x2 footprint
-        Assert.InRange(newTy, 2, 3);
+        Assert.InRange(newTx, drillX, drillX + 1);                      // still inside the 2x2 footprint
+        Assert.InRange(newTy, drillY, drillY + 1);
         Assert.False(sim.Resources.GetResourceAt(newTx, newTy).IsEmpty);
         Assert.True(chestInv.TotalItems() > 0);                         // kept producing across the re-target
     }
@@ -1362,14 +1410,16 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
-        sim.Submit(PlaceChest(sim, 2, 2));
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine (seed 0)
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine
 
         // Fill the output chest completely so the finished item has nowhere to go.
         int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
@@ -1389,7 +1439,7 @@ public class SimulationTests
         // Direct inventory manipulation bypasses the 3 real wake triggers (RotateEntity/
         // TransferFromEntity/inserter grab) — explicitly wake the drill waiting on this
         // output tile, per the established "direct inventory manipulation" test convention.
-        sim.MiningDrills.WakeWaitersAt(2, 2);
+        sim.MiningDrills.WakeWaitersAt(chestX, chestY);
         sim.Step();
 
         Assert.False(sim.MiningDrills.IsCompleted(drillId));          // resumed
@@ -1408,14 +1458,16 @@ public class SimulationTests
         // MiningDrillsTickPreSettle, or it would be stuck asleep forever.
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
-        sim.Submit(PlaceChest(sim, 2, 2));
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine (seed 0)
+        Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId)); // has ore to mine
 
         // Fill the output chest completely so the finished item has nowhere to go.
         int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
@@ -1447,12 +1499,14 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));
-        sim.Submit(PlaceChest(sim, 2, 2));
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
         Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId));
 
@@ -1812,18 +1866,21 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东,输出到 (2,2)
-        sim.Submit(PlaceChest(sim, 2, 2));                // 旧输出格
-        sim.Submit(PlaceChest(sim, 0, 4));                // 新输出格(朝南 rotation=2 时:(0,2)+(0,2)*2=(0,4))
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));         // 朝东,输出到 (drillX+2, drillY)
+        int oldOutX = drillX + 2, oldOutY = drillY;
+        int newOutX = drillX, newOutY = drillY + 2;                      // 新输出格(朝南 rotation=2 时)
+        sim.Submit(PlaceChest(sim, oldOutX, oldOutY));                   // 旧输出格
+        sim.Submit(PlaceChest(sim, newOutX, newOutY));                   // 新输出格
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
-        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 4)));
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(oldOutX, oldOutY)));
+        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(newOutX, newOutY)));
 
         // 还没挖完(!IsCompleted)时转向 —— 不在危险窗口,立即生效。
         Assert.False(sim.MiningDrills.IsCompleted(drillId));
-        sim.Submit(RotateEntity(0, 2, 2));   // 南
+        sim.Submit(RotateEntity(drillX, drillY, 2));   // 南
         sim.Step();
 
         int tick = 0;
@@ -1845,17 +1902,20 @@ public class SimulationTests
         // 这个用例要跑完整整两轮挖矿周期 + 若干轮询,PlacePoweredDrillInfra 自带的 5 块煤
         // (~222 tick 满功率预算)撑不住,直接给发电机灌满,把燃料排除在变量之外。
         sim.ElectricGrid.SetFuelBufferJ(sim.World.GetEntityAt(2, 0), 1_000_000_000L);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东,输出到 (2,2)
-        sim.Submit(PlaceChest(sim, 2, 2));                // 旧输出格
-        sim.Submit(PlaceChest(sim, 0, 4));                // 新输出格(朝南)
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        int oldOutX = drillX + 2, oldOutY = drillY;
+        int newOutX = drillX, newOutY = drillY + 2;
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东,输出到 (oldOutX, oldOutY)
+        sim.Submit(PlaceChest(sim, oldOutX, oldOutY));              // 旧输出格
+        sim.Submit(PlaceChest(sim, newOutX, newOutY));              // 新输出格(朝南)
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        Assert.True(sim.World.GetEntityAt(2, 2).IsValid, "old output chest missing");
-        Assert.True(sim.World.GetEntityAt(0, 4).IsValid, "new output chest missing");
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        Assert.True(sim.World.GetEntityAt(oldOutX, oldOutY).IsValid, "old output chest missing");
+        Assert.True(sim.World.GetEntityAt(newOutX, newOutY).IsValid, "new output chest missing");
         Assert.NotEqual(-1, sim.MiningDrills.GetTargetX(drillId));
-        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(2, 2)));
-        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(0, 4)));
+        var oldOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(oldOutX, oldOutY)));
+        var newOutInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(sim.World.GetEntityAt(newOutX, newOutY)));
 
         // 堵住旧输出格,逼它停在"挖完待排出"的危险窗口里。
         int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
@@ -1867,7 +1927,7 @@ public class SimulationTests
         Assert.True(sim.MiningDrills.IsCompleted(drillId), $"never completed after {tick} ticks; progress={sim.MiningDrills.GetProgress(drillId)}, targetX={sim.MiningDrills.GetTargetX(drillId)}");
 
         // 挖完待排出时发转向:排队,不立即改朝向(排出格还没落地)。
-        sim.Submit(RotateEntity(0, 2, 2));   // 南
+        sim.Submit(RotateEntity(drillX, drillY, 2));   // 南
         sim.Step();
         Assert.True(sim.MiningDrills.IsCompleted(drillId));   // 仍卡在旧朝向的危险窗口
 
@@ -1879,7 +1939,7 @@ public class SimulationTests
         // only queues the pending rotation, it doesn't wake a completed drill by design) —
         // explicitly wake the drill waiting on this output tile, per the established
         // "direct inventory manipulation" test convention.
-        sim.MiningDrills.WakeWaitersAt(2, 2);
+        sim.MiningDrills.WakeWaitersAt(oldOutX, oldOutY);
         tick = 0;
         while (sim.MiningDrills.IsCompleted(drillId) && tick < 50) { sim.Step(); tick++; }
         Assert.False(sim.MiningDrills.IsCompleted(drillId));               // flush 成功
@@ -2337,19 +2397,15 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东输出到 (2,2)
-        sim.Submit(PlaceChest(sim, 2, 2));
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东输出到 (chestX, chestY)
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-
-        bool foundResource = false;
-        for (int dy = 0; dy < 2 && !foundResource; dy++)
-            for (int dx = 0; dx < 2 && !foundResource; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
-        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
 
         // 把箱子塞满(16 槽 x 某个 stack size 的任意填充物),逼采矿机挖完之后卡住。
         int fillerId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
@@ -2363,7 +2419,7 @@ public class SimulationTests
         // 宽松的 eventual-consistency 循环(Machines 最终审查 Finding 2 教训:那样
         // 可能被 60-tick 安全网碰巧满足,测不出 WakeWaitersAt 这条路径本身)。
         int before = chestInv.CountOf(fillerId);
-        sim.Submit(TransferFrom(2, 2, fillerId, fillerStack));
+        sim.Submit(TransferFrom(chestX, chestY, fillerId, fillerStack));
         sim.Step();
 
         Assert.True(chestInv.CountOf(fillerId) < before);   // 命令确实腾出了空间
@@ -2375,19 +2431,15 @@ public class SimulationTests
     {
         var sim = NewSim();
         PlacePoweredDrillInfra(sim);
-        sim.Submit(PlaceDrill(sim, 0, 2, rotation: 1));   // 朝东输出到 (2,2)
-        sim.Submit(PlaceChest(sim, 2, 2));
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
+        int chestX = drillX + 2, chestY = drillY;
+        sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));   // 朝东输出到 (chestX, chestY)
+        sim.Submit(PlaceChest(sim, chestX, chestY));
         sim.Step();
 
-        var drillId = sim.World.GetEntityAt(0, 2);
-        var chestId = sim.World.GetEntityAt(2, 2);
+        var drillId = sim.World.GetEntityAt(drillX, drillY);
+        var chestId = sim.World.GetEntityAt(chestX, chestY);
         var chestInv = sim.Inventories.Get(sim.Inventories.GetInventoryId(chestId));
-
-        bool foundResource = false;
-        for (int dy = 0; dy < 2 && !foundResource; dy++)
-            for (int dx = 0; dx < 2 && !foundResource; dx++)
-                if (!sim.Resources.GetResourceAt(dx, 2 + dy).IsEmpty) foundResource = true;
-        Assert.True(foundResource, "adjust drill placement if the seeded map doesn't have ore here");
 
         int fillerId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
         int fillerStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
@@ -2396,17 +2448,20 @@ public class SimulationTests
         for (int t = 0; t < 200; t++) sim.Step();
         Assert.False(sim.MiningDrills.IsAwake(drillId));
 
-        // 现在才放机械臂(身后=箱子(2,2)、身前=另一个箱子(4,2)),让它把箱子里的东西搬走。
-        // 机械臂在 (3,2),离唯一的电线杆 (0,0) 的 Chebyshev 距离是 3,超出
-        // small-electric-pole 的 supplyAreaDistanceTiles(2)——单靠那根杆够不到它,
-        // 机械臂会因为 satisfaction==0 永远不抓。补一根线距内(<=7)的杆在 (3,4)
-        // (不能放 (3,0)——那里是发电机 2x2 footprint (2,0)-(3,1) 已经占用的格子,
-        // PlaceEntity 会被 RejectedCommandCount 静默拒绝):供电区覆盖到 (3,2)
-        // (Chebyshev 距离 2),同时通过 maximumWireDistanceTiles(7)并入已有电网
-        // (距 (0,0) 为 4,在 7 以内)。
-        sim.Submit(PlacePole(sim, 3, 4));
-        sim.Submit(PlaceChest(sim, 4, 2));
-        sim.Submit(PlaceInserter(sim, 3, 2, rotation: 1));   // East: pickup(2,2) chest -> drop(4,2) chest
+        // 现在才放机械臂(身后=输出箱、身前=另一个箱子),让它把箱子里的东西搬走。
+        // 机械臂离唯一的电线杆 (0,0) 的 Chebyshev 距离若超出 small-electric-pole 的
+        // supplyAreaDistanceTiles(2),单靠那根杆够不到它,机械臂会因为 satisfaction==0
+        // 永远不抓——按需补一根线距内(<=7)的杆并入已有电网(同旧版写死坐标时的推理,
+        // 只是现在跟着探测到的 drill 位置走,而不是写死 (3,4))。
+        int inserterX = chestX + 1, inserterY = chestY;
+        int dropX = chestX + 2, dropY = chestY;
+        if (Math.Max(Math.Abs(inserterX), Math.Abs(inserterY)) > 2)
+        {
+            int extraPoleX = inserterX, extraPoleY = inserterY + 4;
+            sim.Submit(PlacePole(sim, extraPoleX, extraPoleY));
+        }
+        sim.Submit(PlaceChest(sim, dropX, dropY));
+        sim.Submit(PlaceInserter(sim, inserterX, inserterY, rotation: 1));   // East: pickup chest -> drop chest
         sim.Step();
 
         int fillCount = chestInv.CountOf(fillerId);
