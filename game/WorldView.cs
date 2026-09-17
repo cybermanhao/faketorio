@@ -206,11 +206,25 @@ public partial class WorldView : Node2D
             }
         }
 
-        // 7. 光标格高亮 —— 手挖按住时按"够不够得着"着色。
+        // 7. 光标格高亮 —— 手挖按住时按"够不够得着"着色。悬停/长按在多格实体的任意
+        // 一格上,框要画成实体的完整占地(origin + TileWidth×TileHeight),不是固定
+        // 1x1——OccupyArea 把占地内每一格都指向同一个 EntityId,所以直接查 hover 格
+        // 就能拿到正确的 origin/尺寸;仅影响画框范围,MineStart 提交的目标格仍是
+        // hover 格本身(单格),不受这里影响。
         {
             var (hx, hy) = _build.HoverTile;
-            var s = t.TileToScreen(hx, hy).ToGodot();
-            var r = new Rect2(s, new Vector2(ppt, ppt));
+            int boxX = hx, boxY = hy, boxW = 1, boxH = 1;
+            var hoverEid = sim.World.GetEntityAt(hx, hy);
+            if (hoverEid.IsValid)
+            {
+                ref readonly var hd = ref sim.Entities.Get(hoverEid);
+                if (sim.Prototypes.GetById(hd.ProtoId) is EntityPrototype hep)
+                {
+                    boxX = hd.X; boxY = hd.Y; boxW = hep.TileWidth; boxH = hep.TileHeight;
+                }
+            }
+            var s = t.TileToScreen(boxX, boxY).ToGodot();
+            var r = new Rect2(s, new Vector2(ppt * boxW, ppt * boxH));
 
             Color col;
             if (_build.LastCommandRejected)
