@@ -237,6 +237,43 @@ public partial class WorldView : Node2D
             DrawRect(r, col, false, 2f);
         }
 
+        // 7b. 挖矿/拆除进度条——Player.Mining 期间画在目标格正下方。挖矿(E 键)和
+        // 拆除(长按右键)在 sim 里是同一套 MineStart/MineStop/MineProgress 状态,
+        // 不需要区分,一套渲染逻辑就够了。阈值解析跟 Simulation.PlayerMine() 同一套
+        // 优先级:目标格有实体且带 MinableResult 就用实体的 MiningTimeTicks,否则
+        // 查矿脉用 ResourcePrototype.MiningTimeTicks——矿脉查询走 PeekResourceAt
+        // (无副作用只读版本),不能用 GetResourceAt(会触发 chunk 生成,渲染器不能碰
+        // 会进状态哈希的 sim 方法)。
+        if (sim.Player.Mining)
+        {
+            int mx = sim.Player.MineTargetX, my = sim.Player.MineTargetY;
+            long threshold = 0;
+            var mineEid = sim.World.GetEntityAt(mx, my);
+            if (mineEid.IsValid && sim.Prototypes.GetById(sim.Entities.Get(mineEid).ProtoId) is EntityPrototype mep
+                && mep.MinableResult is not null)
+            {
+                threshold = mep.MiningTimeTicks;
+            }
+            else
+            {
+                var cell = sim.Resources.PeekResourceAt(mx, my);
+                if (!cell.IsEmpty)
+                    threshold = ((Faketorio.Sim.Prototypes.ResourcePrototype)sim.Prototypes.GetById(cell.ResourceProtoId)).MiningTimeTicks;
+            }
+
+            if (threshold > 0)
+            {
+                float frac = Mathf.Clamp((float)sim.Player.MineProgress / threshold, 0f, 1f);
+                var tileScreen = t.TileToScreen(mx, my).ToGodot();
+                float barW = ppt * 0.9f, barH = Mathf.Max(3f, ppt * 0.12f);
+                var barPos = tileScreen + new Vector2((ppt - barW) / 2f, ppt + 2f);
+
+                DrawRect(new Rect2(barPos, new Vector2(barW, barH)), new Color(0.15f, 0.12f, 0.05f, 0.85f));
+                DrawRect(new Rect2(barPos, new Vector2(barW * frac, barH)), new Color(1f, 0.75f, 0.2f, 0.95f));
+                DrawRect(new Rect2(barPos, new Vector2(barW, barH)), new Color(0, 0, 0, 0.6f), false, 1f);
+            }
+        }
+
         // 8. 相机模式 HUD —— 左上角文字,M 键切换时肉眼可见。
         {
             string label = _cam.Mode == CameraMode.Follow ? "FOLLOW" : "MAP (free)";
