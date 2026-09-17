@@ -160,6 +160,48 @@ public class SimulationTests
         Assert.Equal(EntityId.Invalid, sim.World.GetEntityAt(0, 0));
     }
 
+    [Fact]
+    public void PlaceEntity_AllEntityTypes_RegisterCorrectly_RegressionForRefactor()
+    {
+        // 重构 CreateAndRegisterEntity 前的行为快照——belt/container/pole/generator/
+        // machine/drill/inserter 各摆一个,确认注册到了各自的子系统里。重构后这条
+        // 必须继续通过,证明抽 helper 没有改变任何实际行为。
+        var sim = NewSim();
+
+        int belt = sim.Prototypes.Get<TransportBeltPrototype>("transport-belt-basic").Id;
+        int chest = sim.Prototypes.Get<ContainerPrototype>("wooden-chest").Id;
+        int pole = sim.Prototypes.Get<ElectricPolePrototype>("small-electric-pole").Id;
+        int gen = sim.Prototypes.Get<FuelGeneratorPrototype>("burner-generator").Id;
+        int furnace = sim.Prototypes.Get<FurnacePrototype>("stone-furnace").Id;
+        int drill = sim.Prototypes.Get<MiningDrillPrototype>("electric-mining-drill").Id;
+        int inserter = sim.Prototypes.Get<InserterPrototype>("inserter-basic").Id;
+
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = belt, X = 0, Y = 0, Rotation = 1 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = chest, X = 1, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = pole, X = 2, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = gen, X = 3, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = furnace, X = 6, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = drill, X = 9, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = inserter, X = 12, Y = 0 });
+        sim.Step();
+
+        Assert.Equal(0, sim.RejectedCommandCount);
+        var beltId = sim.World.GetEntityAt(0, 0);
+        Assert.True(sim.Belts.GetLineAt(0, 0).IsValid, "belt should register in BeltNetwork");
+        var chestId = sim.World.GetEntityAt(1, 0);
+        Assert.True(sim.Inventories.GetInventoryId(chestId).IsValid, "chest should get an inventory");
+        Assert.True(sim.ElectricGrid.FindNetworkAt(2, 0).IsValid, "pole should register in ElectricGrid");
+        var genId = sim.World.GetEntityAt(3, 0);
+        Assert.Contains(genId, sim.ElectricGrid.GeneratorIds);
+        var furnaceId = sim.World.GetEntityAt(6, 0);
+        Assert.True(sim.Inventories.GetInventoryId(furnaceId, role: 1).IsValid, "furnace should get input inventory");
+        Assert.True(sim.Inventories.GetInventoryId(furnaceId, role: 2).IsValid, "furnace should get output inventory");
+        var drillId = sim.World.GetEntityAt(9, 0);
+        Assert.Contains(drillId, sim.MiningDrills.ActiveIds);
+        var inserterId = sim.World.GetEntityAt(12, 0);
+        Assert.Contains(inserterId, sim.Inserters.ActiveIds);
+    }
+
     private const byte E = 1;
 
     private static Command PlaceBelt(Simulation sim, int x, int y, byte rot) => new()

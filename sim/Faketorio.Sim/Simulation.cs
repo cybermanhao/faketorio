@@ -372,35 +372,7 @@ public sealed class Simulation
                     RejectedCommandCount++;
                     return;
                 }
-                var id = Entities.Create(new EntityData
-                {
-                    ProtoId = command.ProtoId,
-                    X = command.X,
-                    Y = command.Y,
-                    Rotation = command.Rotation,
-                });
-                World.OccupyArea(command.X, command.Y, proto.TileWidth, proto.TileHeight, id);
-                if (proto is TransportBeltPrototype)
-                    Belts.AddBelt(command.X, command.Y, command.Rotation);
-                if (proto is ContainerPrototype cp)
-                    Inventories.AddContainer(id, cp.InventorySize);
-                if (proto is ElectricPolePrototype pole)
-                    ElectricGrid.RegisterPole(id, command.X, command.Y, pole.MaximumWireDistanceTiles, pole.SupplyAreaDistanceTiles);
-                if (proto is FuelGeneratorPrototype gen)
-                {
-                    Inventories.AddContainer(id, 1, filterItemProtoId: gen.FuelItemProtoId);
-                    ElectricGrid.RegisterGenerator(id);
-                }
-                if (proto is CraftingMachinePrototype cmp)
-                {
-                    Inventories.AddContainer(id, cmp.InputSlots, role: 1);
-                    Inventories.AddContainer(id, cmp.OutputSlots, role: 2);
-                    Machines.RegisterMachine(id);
-                }
-                if (proto is MiningDrillPrototype)
-                    MiningDrills.RegisterDrill(id);
-                if (proto is InserterPrototype)
-                    Inserters.RegisterInserter(id);
+                CreateAndRegisterEntity(proto, command.ProtoId, command.X, command.Y, command.Rotation);
                 return;
             }
             case CommandType.RemoveEntity:
@@ -608,6 +580,42 @@ public sealed class Simulation
                 RejectedCommandCount++;
                 return;
         }
+    }
+
+    // PlaceEntity 和 BuildFromInventory 共用的实体创建 + 按原型类型分派注册逻辑。
+    // 调用方已经做完全部前置检查(占地/距离/库存),这里只管创建。
+    private EntityId CreateAndRegisterEntity(EntityPrototype proto, int protoId, int x, int y, byte rotation)
+    {
+        var id = Entities.Create(new EntityData
+        {
+            ProtoId = protoId,
+            X = x,
+            Y = y,
+            Rotation = rotation,
+        });
+        World.OccupyArea(x, y, proto.TileWidth, proto.TileHeight, id);
+        if (proto is TransportBeltPrototype)
+            Belts.AddBelt(x, y, rotation);
+        if (proto is ContainerPrototype cp)
+            Inventories.AddContainer(id, cp.InventorySize);
+        if (proto is ElectricPolePrototype pole)
+            ElectricGrid.RegisterPole(id, x, y, pole.MaximumWireDistanceTiles, pole.SupplyAreaDistanceTiles);
+        if (proto is FuelGeneratorPrototype gen)
+        {
+            Inventories.AddContainer(id, 1, filterItemProtoId: gen.FuelItemProtoId);
+            ElectricGrid.RegisterGenerator(id);
+        }
+        if (proto is CraftingMachinePrototype cmp)
+        {
+            Inventories.AddContainer(id, cmp.InputSlots, role: 1);
+            Inventories.AddContainer(id, cmp.OutputSlots, role: 2);
+            Machines.RegisterMachine(id);
+        }
+        if (proto is MiningDrillPrototype)
+            MiningDrills.RegisterDrill(id);
+        if (proto is InserterPrototype)
+            Inserters.RegisterInserter(id);
+        return id;
     }
 
     // 移除一个实体:清占地 + 销毁 + belt/container 后处理。命令路径(RemoveEntity)
