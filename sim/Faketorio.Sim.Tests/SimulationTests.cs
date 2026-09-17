@@ -202,6 +202,143 @@ public class SimulationTests
         Assert.Contains(inserterId, sim.Inserters.ActiveIds);
     }
 
+    private static Command BuildFromInventory(Simulation sim, string itemName, int x, int y, byte rotation = 0) => new()
+    {
+        Type = CommandType.BuildFromInventory,
+        ProtoId = sim.Prototypes.Get<ItemPrototype>(itemName).Id,
+        X = x, Y = y, Rotation = rotation,
+    };
+
+    [Fact]
+    public void BuildFromInventory_Succeeds_ConsumesItemAndCreatesEntity()
+    {
+        var sim = NewSim();
+        int before = sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id);
+        Assert.True(before > 0, "starter kit should include small-electric-pole per Task 2");
+
+        sim.Submit(BuildFromInventory(sim, "small-electric-pole", 0, 0));
+        sim.Step();
+
+        Assert.Equal(0, sim.RejectedCommandCount);
+        Assert.Equal(before - 1, sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id));
+        Assert.True(sim.World.GetEntityAt(0, 0).IsValid);
+        Assert.True(sim.ElectricGrid.FindNetworkAt(0, 0).IsValid);
+    }
+
+    [Fact]
+    public void BuildFromInventory_OutOfReach_Rejected()
+    {
+        var sim = NewSim();   // 玩家在 (0,0),ReachSubTiles 1536 = 6 tile
+        int before = sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id);
+
+        sim.Submit(BuildFromInventory(sim, "small-electric-pole", 20, 0));
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(before, sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id));
+        Assert.False(sim.World.GetEntityAt(20, 0).IsValid);
+    }
+
+    [Fact]
+    public void BuildFromInventory_NoPlaceResult_Rejected()
+    {
+        var sim = NewSim();
+        int ironPlateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;   // 铁板没有 placeResult
+
+        sim.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = ironPlateId, X = 0, Y = 0 });
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.False(sim.World.GetEntityAt(0, 0).IsValid);
+    }
+
+    [Fact]
+    public void BuildFromInventory_InsufficientInventory_Rejected()
+    {
+        var sim = NewSim();
+        int drillId = sim.Prototypes.Get<ItemPrototype>("electric-mining-drill").Id;
+        int have = sim.Player.Inventory.CountOf(drillId);   // starter kit 给了 1
+        for (int i = 0; i < have; i++)
+        {
+            sim.Submit(BuildFromInventory(sim, "electric-mining-drill", 0, -2 - i * 3));
+            sim.Step();
+        }
+        Assert.Equal(0, sim.Player.Inventory.CountOf(drillId));
+
+        sim.Submit(BuildFromInventory(sim, "electric-mining-drill", 0, -20));
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.False(sim.World.GetEntityAt(0, -20).IsValid);
+    }
+
+    [Fact]
+    public void BuildFromInventory_AreaNotFree_Rejected()
+    {
+        var sim = NewSim();
+        sim.Submit(PlaceChest(sim, 0, 0));   // 先占住 (0,0)
+        sim.Step();
+        int before = sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id);
+
+        sim.Submit(BuildFromInventory(sim, "small-electric-pole", 0, 0));   // 撞上刚放的箱子
+        sim.Step();
+
+        Assert.Equal(1, sim.RejectedCommandCount);
+        Assert.Equal(before, sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("small-electric-pole").Id));
+    }
+
+    [Fact]
+    public void BuildFromInventory_MultipleEntityTypes_RegistersCorrectly()
+    {
+        // 跟 Task 3 的 PlaceEntity 回归测试对称——确认 BuildFromInventory 复用的
+        // CreateAndRegisterEntity 对每种实体类型都注册对了。
+        //
+        // 注意坐标 (5, 0) 而非 (6, 0):BuildFromInventory 比 PlaceEntity 多一层距离检查
+        // (玩家出生于原点子格 (0,0),ReachSubTiles=1536)。tile x=6 的格心在子格 1664 处,
+        // 已经超出 6 格的可达范围;x=5 的格心在 1408,在范围内。PlaceEntity 没有距离检查,
+        // 所以 Task 3 的回归测试可以用 (6,0) 而不受影响。
+        //
+        // transport-belt-basic / inserter-basic 不在开局物资包里(Task 2 只给了
+        // drill/furnace/generator/pole/chest),这里直接塞库存来测试 BuildFromInventory
+        // 本身的建造逻辑,不依赖开局物资包的具体内容。
+        var sim = NewSim();
+        sim.Player.Inventory.Insert(sim.Prototypes.Get<ItemPrototype>("transport-belt-basic").Id, 1, 50);
+        sim.Player.Inventory.Insert(sim.Prototypes.Get<ItemPrototype>("inserter-basic").Id, 1, 50);
+
+        sim.Submit(BuildFromInventory(sim, "transport-belt-basic", 0, 0, rotation: 1));
+        sim.Submit(BuildFromInventory(sim, "small-electric-pole", 2, 0));
+        sim.Submit(BuildFromInventory(sim, "burner-generator", 3, 0));
+        sim.Submit(BuildFromInventory(sim, "stone-furnace", 5, 0));
+        sim.Submit(BuildFromInventory(sim, "electric-mining-drill", 0, -2));
+        sim.Submit(BuildFromInventory(sim, "inserter-basic", 0, 3));
+        sim.Step();
+
+        Assert.Equal(0, sim.RejectedCommandCount);
+        Assert.True(sim.Belts.GetLineAt(0, 0).IsValid);
+        Assert.True(sim.ElectricGrid.FindNetworkAt(2, 0).IsValid);
+        Assert.Contains(sim.World.GetEntityAt(3, 0), sim.ElectricGrid.GeneratorIds);
+        var furnaceId = sim.World.GetEntityAt(5, 0);
+        Assert.True(sim.Inventories.GetInventoryId(furnaceId, role: 1).IsValid);
+        Assert.Contains(sim.World.GetEntityAt(0, -2), sim.MiningDrills.ActiveIds);
+        Assert.Contains(sim.World.GetEntityAt(0, 3), sim.Inserters.ActiveIds);
+    }
+
+    [Fact]
+    public void PlaceEntity_StillFree_NoInventoryCheck()
+    {
+        // 回归测试:确认 BuildFromInventory 落地后 PlaceEntity 完全没受影响。
+        var sim = NewSim();
+        int beforePlates = sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("iron-plate").Id);
+        int drillProtoId = sim.Prototypes.Get<MiningDrillPrototype>("electric-mining-drill").Id;
+
+        sim.Submit(new Command { Type = CommandType.PlaceEntity, ProtoId = drillProtoId, X = 0, Y = -2, Rotation = 2 });
+        sim.Step();
+
+        Assert.Equal(0, sim.RejectedCommandCount);
+        Assert.True(sim.World.GetEntityAt(0, -2).IsValid);
+        Assert.Equal(beforePlates, sim.Player.Inventory.CountOf(sim.Prototypes.Get<ItemPrototype>("iron-plate").Id));
+    }
+
     private const byte E = 1;
 
     private static Command PlaceBelt(Simulation sim, int x, int y, byte rot) => new()

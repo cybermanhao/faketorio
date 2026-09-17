@@ -442,4 +442,19 @@ public class PrototypeLoaderTests
         Assert.Equal(2, sim.Player.Inventory.CountOf(poleItem.Id));
         Assert.Equal(20, sim.Player.Inventory.CountOf(coalItem.Id));
     }
+
+    [Fact]
+    public void TryGetEntityByName_FindsEntityAcrossConcreteSubtypes()
+    {
+        var registry = PrototypeLoader.LoadFromDirectory("data/base");
+
+        Assert.True(registry.TryGetEntityByName("small-electric-pole", out var pole));
+        Assert.IsType<Faketorio.Sim.Prototypes.ElectricPolePrototype>(pole);
+
+        Assert.True(registry.TryGetEntityByName("stone-furnace", out var furnace));
+        Assert.IsType<Faketorio.Sim.Prototypes.FurnacePrototype>(furnace);
+
+        Assert.False(registry.TryGetEntityByName("iron-plate", out _));   // 物品不是实体
+        Assert.False(registry.TryGetEntityByName("does-not-exist", out _));
+    }
 }

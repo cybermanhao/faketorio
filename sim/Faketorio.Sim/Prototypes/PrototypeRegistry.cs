@@ -5,6 +5,7 @@ public sealed class PrototypeRegistry
     // 键: (具体 CLR 类型, name)。item 与 entity 允许同名。
     private readonly Dictionary<(Type, string), PrototypeBase> _byTypeAndName = new();
     private readonly List<PrototypeBase> _byId = new();
+    private readonly Dictionary<string, EntityPrototype> _entitiesByName = new();
 
     public int Count => _byId.Count;
 
@@ -29,6 +30,9 @@ public sealed class PrototypeRegistry
             all[i].Id = i;
             _byId.Add(all[i]);
         }
+
+        foreach (var p in all)
+            if (p is EntityPrototype ep) _entitiesByName[ep.Name] = ep;
     }
 
     public T Get<T>(string name) where T : PrototypeBase
@@ -57,4 +61,10 @@ public sealed class PrototypeRegistry
         proto = null!;
         return false;
     }
+
+    // 按名字查任意子类型的 EntityPrototype,不要求调用方知道具体是哪个子类——
+    // Get<T>/TryGet<T> 按 (具体 CLR 类型, name) 做键,查不到抽象基类;这个方法
+    // 专门补上"我只有个名字,不知道是哪种实体"这个场景(BuildFromInventory 用)。
+    public bool TryGetEntityByName(string name, out EntityPrototype proto)
+        => _entitiesByName.TryGetValue(name, out proto!);
 }

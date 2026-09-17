@@ -375,6 +375,41 @@ public sealed class Simulation
                 CreateAndRegisterEntity(proto, command.ProtoId, command.X, command.Y, command.Rotation);
                 return;
             }
+            case CommandType.BuildFromInventory:
+            {
+                if (!Prototypes.TryGetById(command.ProtoId, out var itemP) || itemP is not ItemPrototype itemProto
+                    || itemProto.PlaceResult is null
+                    || !Prototypes.TryGetEntityByName(itemProto.PlaceResult, out var entityProto)
+                    || command.Rotation > 3)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                long ddx3 = Player.X - (command.X * 256 + 128);
+                long ddy3 = Player.Y - (command.Y * 256 + 128);
+                if (ValueNoise.Isqrt(ddx3 * ddx3 + ddy3 * ddy3) > _playerProto.ReachSubTiles)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                if (!World.IsAreaFree(command.X, command.Y, entityProto.TileWidth, entityProto.TileHeight))
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                if (Player.Inventory.CountOf(command.ProtoId) <= 0)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                Player.Inventory.Remove(command.ProtoId, 1);
+                CreateAndRegisterEntity(entityProto, entityProto.Id, command.X, command.Y, command.Rotation);
+                return;
+            }
             case CommandType.RemoveEntity:
             {
                 var id = World.GetEntityAt(command.X, command.Y);
