@@ -1102,25 +1102,7 @@ public class SimulationTests
         // Pole is at (0,0), so drill must be within Chebyshev distance 2.
         // Task 2 data变更影响 resource id,导致矿脉分布改变,需要搜索新的有矿坐标。
         // 采矿机 2x2 footprint,朝东(rotation=1)输出到东方 2 格处。
-        int drillX = 0, drillY = 0;
-        bool foundOreLocation = false;
-        // 在 pole 的供电范围内搜索有矿的 2x2 区域
-        for (int ty = -2; ty <= 1 && !foundOreLocation; ty++) {
-            for (int tx = -1; tx <= 1 && !foundOreLocation; tx++) {
-                bool hasOre = false;
-                for (int dy = 0; dy < 2 && !hasOre; dy++) {
-                    for (int dx = 0; dx < 2 && !hasOre; dx++) {
-                        if (!sim.Resources.GetResourceAt(tx + dx, ty + dy).IsEmpty) hasOre = true;
-                    }
-                }
-                if (hasOre) {
-                    drillX = tx;
-                    drillY = ty;
-                    foundOreLocation = true;
-                }
-            }
-        }
-        Assert.True(foundOreLocation, "could not find a 2x2 area with ore under the default seed within powered region");
+        var (drillX, drillY) = FindPoweredOreOrigin(sim);
 
         sim.Submit(PlaceDrill(sim, drillX, drillY, rotation: 1));
         int chestX = drillX + 2, chestY = drillY;
