@@ -82,10 +82,14 @@ private byte _selectedRotation = 0; // 0-3,当前选中项的朝向
 
 ### 3.3 拖拽绑定（背包格 → 快捷栏格）
 
-- 鼠标在背包格上按下 → 记录 `_dragItemProtoId`（该格物品的原型 id；如果该物品没有 `PlaceResult`，仍然记录但标记"不可放入快捷栏"，用于释放时判断）。
-- 拖动中：画一个跟随鼠标的幽灵图标（复用 `RenderPalette.ForEntity` 的配色 + 物品名文字，跟现有渲染风格一致）。
-- 释放在快捷栏格上：如果 `_dragItemProtoId` 对应的物品有 `PlaceResult`，`_hotbarGroups[_activeGroup][目标格下标] = _dragItemProtoId`；否则不绑定，幽灵图标直接消失，无提示。
-- 释放在非快捷栏区域（比如背包内部、空白处）：不绑定，幽灵图标消失。
+**状态用 `int? _dragItemProtoId`（可空），不是 `int`**——`null` 表示"当前没有在拖东西"，这跟快捷栏槽位用 `-1` 表示"空槽/解绑"是两个不同的语义，不能共用同一个哨兵值。如果共用 `-1`，从背包**空格**按下鼠标会把 `_dragItemProtoId` 设成 `-1`，之后如果释放在某个已绑定的快捷栏格上，`_hotbarGroups[...][...] = _dragItemProtoId` 会把 `-1` 写进去——效果等同于中键解绑，但玩家的操作明明是"从空格拖了个空气过去"，不是"我要解绑这一格"。两件事撞在一起是真 bug，必须用 `int?` 区分开。
+
+- 鼠标在背包格上按下：
+  - 该格**非空**（`ItemStack.ItemProtoId != 0`）→ `_dragItemProtoId = 该物品原型 id`，开始拖拽。
+  - 该格**为空**（`ItemProtoId == 0`）→ **不开始拖拽**，`_dragItemProtoId` 保持 `null`，后续的"拖动中""释放"两步整个跳过（等同于什么都没发生）。这是唯一正确的处理——空格没有"物品"可言，谈不上"拖了个不可放入快捷栏的东西"，从语义上就该在按下这一步直接短路,不进入拖拽状态机。
+- 拖动中（仅当 `_dragItemProtoId.HasValue`）：画一个跟随鼠标的幽灵图标（复用 `RenderPalette.ForEntity` 的配色 + 物品名文字，跟现有渲染风格一致）。
+- 释放在快捷栏格上（仅当 `_dragItemProtoId.HasValue`）：如果该物品有 `PlaceResult`，`_hotbarGroups[_activeGroup][目标格下标] = _dragItemProtoId.Value`；否则（没有 `PlaceResult`）不绑定，幽灵图标直接消失，无提示。两种情况都要把 `_dragItemProtoId` 重置回 `null`。
+- 释放在非快捷栏区域（比如背包内部、空白处）：不绑定，幽灵图标消失，`_dragItemProtoId` 重置回 `null`。
 
 ---
 
@@ -98,7 +102,9 @@ private byte _selectedRotation = 0; // 0-3,当前选中项的朝向
 ### 4.2 布局
 
 - `E` 键切换 `_inventoryOpen` bool，控制面板 `visible`。
-- 格子网格固定 **20 列**（`ColumnCount = 20`，不随窗口宽度重新计算），行数 = `Ceiling(inv.SlotCount / 20.0)`——`SlotCount` 变了（比如以后 sim 侧再扩容）行数自动跟着变，不需要改 UI 代码；`inventorySize = 200` 时正好是 10 行，跟 mockup 里"20×10"对上。格子大小随面板宽度缩放，面板宽度本身固定比例（不随窗口拉伸变化）。
+- 格子网格固定 **20 列**（`ColumnCount = 20`，不随窗口宽度重新计算），行数 = `Ceiling(inv.SlotCount / 20.0)`——`SlotCount` 变了（比如以后 sim 侧再扩容）行数自动跟着变，不需要改 UI 代码；`inventorySize = 200` 时正好是 10 行，跟 mockup 里"20×10"对上。
+- 面板宽度 = `Max(MinPanelWidth, WindowWidth * PanelWidthRatio)`，其中 `MinPanelWidth` 是一个固定像素下限（例如 20 列 × 每格最小可点击/可读尺寸 24px + 列间距，建议下限 **560px**，具体数值由实现阶段结合实际字体/图标渲染效果微调，不在本规范锁死）；`PanelWidthRatio` 沿用 mockup 中的比例（约窗口宽度的 44%）。格子大小 = 面板内容宽度 / 20（随面板宽度缩放，但面板宽度本身有下限，所以格子大小也有隐含下限，不会无限缩小到不可点击/不可读）。
+- 当 `WindowWidth * PanelWidthRatio < MinPanelWidth` 时（极端小窗口），面板按 `MinPanelWidth` 渲染，允许超出"四周留出游戏背景"的宽松布局预期、甚至贴近或触碰窗口边缘——这是可接受的降级行为，不需要为此做额外的响应式重排设计。背包面板本身不设最小窗口尺寸硬性拦截（不锁定/隐藏面板），只保证格子不会缩到不可用。
 - 面板高度可拖拽收缩（顶部一个 resize handle，拖动改变可见行数，超出部分靠垂直滚动查看，滚动条本身可以用 Godot 现成的 `ScrollContainer` 节点，不需要手写滚动逻辑）。
 - 面板悬浮在主区偏左侧，不铺满整个窗口——四周留出能看到游戏世界背景的空间（`WorldView` 的 `_Draw` 不受面板打开与否影响，正常渲染，面板只是叠加在上层的 UI）。
 
