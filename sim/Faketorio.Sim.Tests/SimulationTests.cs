@@ -874,23 +874,22 @@ public class SimulationTests
         int ironPlate = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
         int ironStack = sim.Prototypes.Get<ItemPrototype>("iron-plate").StackSize;
 
-        // 玩家背包 60 槽。Task 2 扩充了开局物资包(data/base/player.json):
+        // 玩家背包 200 槽(Task 1 扩充)。开局物资包(data/base/player.json):
         // iron-plate x8、wooden-chest x1、electric-mining-drill x1、stone-furnace x1、
         // burner-generator x1、small-electric-pole x2、coal x20 —— 7 种不同物品各占
-        // 一槽,起始就占用 7 槽(不再是旧版的 2 槽),其中 coal 槽是半满的(20/50,
-        // 还有 30 个空间)。
+        // 一槽,起始就占用 7 槽,其中 coal 槽是半满的(20/50,还有 30 个空间)。
         //
         // 关键点:Inventory.Insert 先补同类未满槽(第一轮),再占空槽(第二轮)——
         // 玩家现在已经有一个半满的 coal 槽,后面转移煤时这个槽会先被吃掉一部分,
         // 不能再假设"转移进来的煤全部落在新的空槽里"。
         //
         // 为了让这条测试仍然精确覆盖"转移量超过玩家能吃下的量,多出的留在箱子里"
-        // 这条行为,这里把铁板灌到刚好填满*所有*空槽(53 个)外加那个半满的铁板槽
-        // (60 - 7 起始槽 = 53 个空槽;补满半满槽需要 100-8=92,再填满 53 个满槽需要
-        // 53*100),让玩家背包里除了那个半满的 coal 槽以外,再没有任何空间——
+        // 这条行为,这里把铁板灌到刚好填满*所有*空槽(193 个)外加那个半满的铁板槽
+        // (200 - 7 起始槽 = 193 个空槽;补满半满槽需要 100-8=92,再填满 193 个满槽需要
+        // 193*100),让玩家背包里除了那个半满的 coal 槽以外,再没有任何空间——
         // 这样转移煤时第二轮(占空槽)完全没有名额,只有第一轮(补 coal 半满槽的
         // 30 个空间)能接收。
-        sim.Player.Inventory.Insert(ironPlate, (ironStack - 8) + 53 * ironStack, ironStack);
+        sim.Player.Inventory.Insert(ironPlate, (ironStack - 8) + 193 * ironStack, ironStack);
 
         sim.Submit(PlaceChest(sim, 5, 0));
         sim.Step();

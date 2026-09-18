@@ -87,11 +87,14 @@ public class BenchScenarioTests
     // 这是一次真实的、确定性的行为修正,tick-by-tick 结果因此改变,锚点需要再次移动。
     //
     // 三次 re-baseline(P16 合并):Player.Anchored 入 WriteState(多一个 byte)+
-    // 玩家碰撞模型改动(点 vs 盒 + 传送带带人移动)。determinism 断言不受影响,
+    // 玩家碰撞模型改动(点 vs 盒 + 传送带带人移动)。determinism 断언不受影响,
     // 只有这个锚点值移动——合并后 main 的实际行为(P16 变化 + 合并前 main 上
     // 已有的其它行为改动叠加)跟 P16 分支自己原来记的锚点不一样,用 dotnet test
     // 实测的失败断言输出回填。
-    private const ulong GOLDEN_TICK_800 = 11349148617429990271UL;
+    //
+    // 四次 re-baseline(Task 1 扩充玩家背包 60→200):玩家库存大小变化导致 Inventory.WriteState
+    // 序列化字节数增加,所有 tick 的状态哈希都改变。这是数据变更导致的预期行为改动。
+    private const ulong GOLDEN_TICK_800 = 10659014672853988627UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
