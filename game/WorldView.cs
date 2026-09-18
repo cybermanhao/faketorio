@@ -318,7 +318,7 @@ public partial class WorldView : Node2D
             DrawInventoryPanel(sim);
             DrawContextPanel(sim);
         }
-        DrawDragGhost(sim);
+        DrawHeldPreview(sim);
     }
 
     // 能建造的物品(有 PlaceResult 且能解析出实体)用它建成后的实体配色;
@@ -370,7 +370,9 @@ public partial class WorldView : Node2D
         {
             var r = rects.Slots[i];
             int itemId = group[i];
-            bool selected = i == _build.SelectedSlot;
+            // 手持来自背包点选时,快捷栏这边不重复高亮——同一时刻只有一个"手上拿的东西"
+            // 的视觉来源,避免背包格子和快捷栏格子同时高亮造成"到底拿的是哪个"的困惑。
+            bool selected = !_build.HeldFromBackpackSlot.HasValue && i == _build.SelectedSlot;
 
             DrawRect(r, itemId < 0 ? new Color(0.1f, 0.1f, 0.1f, 0.6f) : ItemCellColor(itemId, protos));
             DrawRect(r, selected ? new Color("#ffd24a") : new Color(0.4f, 0.4f, 0.4f),
@@ -409,21 +411,22 @@ public partial class WorldView : Node2D
         var handle = HotbarLayout.ResizeHandle(panel);
         DrawRect(handle, new Color(0.35f, 0.29f, 0.16f));
 
-        var cellRects = HotbarLayout.InventoryGrid(panel, inv.SlotCount, 20, _build.ScrollOffsetRows, out int visibleRows);
+        var cellRects = HotbarLayout.InventoryGrid(panel, inv.SlotCount, HotbarLayout.ColumnCount, _build.ScrollOffsetRows, out int visibleRows);
         int firstRow = Mathf.FloorToInt(_build.ScrollOffsetRows);
         int idx = 0;
         for (int r = 0; r < visibleRows; r++)
         {
             int row = firstRow + r;
-            for (int c = 0; c < 20; c++)
+            for (int c = 0; c < HotbarLayout.ColumnCount; c++)
             {
-                int slotIndex = row * 20 + c;
+                int slotIndex = row * HotbarLayout.ColumnCount + c;
                 if (slotIndex >= inv.SlotCount || idx >= cellRects.Length) goto Done;
                 var rect = cellRects[idx];
                 var stack = inv[slotIndex];
+                bool selected = _build.HeldFromBackpackSlot == slotIndex;
 
                 DrawRect(rect, stack.IsEmpty ? new Color(0.08f, 0.08f, 0.06f, 0.5f) : ItemCellColor(stack.ItemProtoId, protos));
-                DrawRect(rect, new Color(0.3f, 0.27f, 0.2f), false, 1f);
+                DrawRect(rect, selected ? new Color("#ffd24a") : new Color(0.3f, 0.27f, 0.2f), false, selected ? 2f : 1f);
                 if (!stack.IsEmpty)
                     DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(1, rect.Size.Y - 1), stack.Count.ToString(),
                                HorizontalAlignment.Left, rect.Size.X, 8, Colors.White);
@@ -450,23 +453,40 @@ public partial class WorldView : Node2D
             return;
         }
 
-        DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(8, 16), "手搓面板",
-                   HorizontalAlignment.Left, -1f, 13, new Color("#a8d9e8"));
+        // 页签:"建筑"(配方产物有 PlaceResult,能摆进世界的)/"中间产品"(没有,原材料/
+        // 半成品比如 iron-gear-wheel)。这个分类从现有数据直接推导,不需要新字段——
+        // 数据里目前所有手搓配方(category == "crafting")天然就分这两类。
+        var tabs = HotbarLayout.ContextPanelTabs(panel);
+        string[] tabLabels = { "建筑", "中间产品" };
+        for (int i = 0; i < tabs.Length; i++)
+        {
+            bool active = i == _build.ContextTab;
+            DrawRect(tabs[i], active ? new Color(0.16f, 0.22f, 0.27f) : new Color(0.10f, 0.13f, 0.16f));
+            DrawRect(tabs[i], active ? new Color("#a8d9e8") : new Color(0.25f, 0.32f, 0.37f), false, active ? 2f : 1f);
+            DrawString(ThemeDB.FallbackFont, tabs[i].Position + new Vector2(8, 17), tabLabels[i],
+                       HorizontalAlignment.Left, tabs[i].Size.X - 12, 11, active ? Colors.White : new Color(0.7f, 0.7f, 0.7f));
+        }
 
         var protos = sim.Prototypes;
-        float y = panel.Position.Y + 34;
-        const float rowH = 20f;
+        var recipes = new List<RecipePrototype>();
         for (int id = 0; id < protos.Count; id++)
         {
             if (protos.GetById(id) is not RecipePrototype recipe || recipe.Category != "crafting") continue;
-            if (y + rowH > panel.Position.Y + panel.Size.Y) break;   // 面板画不下更多了,直接停(这轮不做滚动)
+            bool isBuildable = recipe.ResolvedResults.Count > 0
+                && protos.GetById(recipe.ResolvedResults[0].ItemProtoId) is ItemPrototype ip && ip.PlaceResult is not null;
+            if ((isBuildable ? 0 : 1) == _build.ContextTab) recipes.Add(recipe);
+        }
 
-            var swatchRect = new Rect2(panel.Position.X + 8, y, 14, 14);
+        var cells = HotbarLayout.ContextPanelGrid(panel, recipes.Count);
+        for (int i = 0; i < recipes.Count; i++)
+        {
+            var recipe = recipes[i];
+            var rect = cells[i];
             var color = recipe.ResolvedResults.Count > 0 ? ItemCellColor(recipe.ResolvedResults[0].ItemProtoId, protos) : new Color(0.5f, 0.5f, 0.5f);
-            DrawRect(swatchRect, color);
-            DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(28, y + 12), recipe.Name,
-                       HorizontalAlignment.Left, panel.Size.X - 36, 10, new Color(0.85f, 0.85f, 0.85f));
-            y += rowH;
+            DrawRect(rect, color);
+            DrawRect(rect, new Color(0.25f, 0.32f, 0.37f), false, 1f);
+            DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(2, rect.Size.Y - 3), recipe.Name,
+                       HorizontalAlignment.Left, rect.Size.X - 4, 7, Colors.White);
         }
     }
 
@@ -480,15 +500,19 @@ public partial class WorldView : Node2D
                    HorizontalAlignment.Left, r.Size.X - 16, 9, new Color(0.5f, 0.5f, 0.6f));
     }
 
-    private void DrawDragGhost(Faketorio.Sim.Simulation sim)
+    // 只要手上"拿着"东西(不管是快捷栏选中的还是背包点选的),鼠标位置就跟一个预览
+    // 图标——不再局限于"正在拖拽中"才画,因为手持现在是粘性状态,点选之后可能过了
+    // 好几帧才去点地图建造,这段时间也应该看得见手上拿的是什么。
+    private void DrawHeldPreview(Faketorio.Sim.Simulation sim)
     {
-        if (!_build.DragItemProtoId.HasValue) return;
-        int itemId = _build.DragItemProtoId.Value;
+        if (!_build.HeldItemProtoId.HasValue) return;
+        int itemId = _build.HeldItemProtoId.Value;
         var proto = sim.Prototypes.GetById(itemId);
         var color = ItemCellColor(itemId, sim.Prototypes);
 
         var size = new Vector2(36, 36);
-        var rect = new Rect2(_build.DragScreenPos - size / 2f, size);
+        var mousePos = GetViewport().GetMousePosition();
+        var rect = new Rect2(mousePos - size / 2f, size);
         DrawRect(rect, color, true);
         DrawRect(rect, new Color("#ffd24a"), false, 2f);
         DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(2, size.Y - 4), proto.Name,

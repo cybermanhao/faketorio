@@ -73,7 +73,7 @@ public static class HotbarLayout
     private const float PanelTopMargin = 70f;
     private const float PanelLeftMargin = 24f;
     private const float PanelPadding = 8f;
-    private const int ColumnCount = 20;
+    public const int ColumnCount = 10;   // 背包容量改回 60 后网格也改回 10 列(6 行),不再是 20 列
     private const float CellGap = 2f;
     private const float MinVisibleRows = 2f;   // heightFraction=0 时仍然至少露出这么多行(收缩下限)
 
@@ -150,10 +150,36 @@ public static class HotbarLayout
         return result.ToArray();
     }
 
+    // 给定一个屏幕坐标,反查命中的背包槽位下标(没命中任何格子返回 null)。跟
+    // InventoryGrid 共用同一份行/列展开逻辑,BuildController 里"按下选中""拖拽释放"
+    // 两处命中判定都调用这一个方法,不再各自重复实现一遍"按行展开找 slotIndex"。
+    public static int? HitTestInventoryGrid(Rect2 panelRect, int slotCount, int columnCount, float scrollOffsetRows, Vector2 point)
+    {
+        var cellRects = InventoryGrid(panelRect, slotCount, columnCount, scrollOffsetRows, out int visibleRowCount);
+        int firstRow = Mathf.FloorToInt(scrollOffsetRows);
+        int idx = 0;
+        for (int r = 0; r < visibleRowCount; r++)
+        {
+            int row = firstRow + r;
+            for (int c = 0; c < columnCount; c++)
+            {
+                int slotIndex = row * columnCount + c;
+                if (slotIndex >= slotCount || idx >= cellRects.Length) return null;
+                if (cellRects[idx].HasPoint(point)) return slotIndex;
+                idx++;
+            }
+        }
+        return null;
+    }
+
     // ---- 手搓/蓝图面板 ----
     private const float MinContextPanelWidth = 280f;
     private const float ContextPanelWidthRatio = 0.32f;
     private const float PanelGap = 10f;
+    private const float ContextTabHeight = 24f;
+    public const int ContextTabCount = 2;   // "建筑" / "中间产品" —— 数量固定,不是数据驱动
+    private const int ContextGridColumns = 6;
+    private const float ContextCellGap = 4f;
 
     // 靠右贴齐:右边界卡在小地图左边缘往左留 PanelGap,不再跟着背包面板宽度走
     // (背包面板变宽/变窄不该把手搓/蓝图面板往右边推得离小地图越来越近甚至压上去)。
@@ -172,6 +198,36 @@ public static class HotbarLayout
         if (x < minX) x = minX;
 
         return new Rect2(new Vector2(x, inv.Position.Y), new Vector2(width, inv.Size.Y));
+    }
+
+    // 面板顶部一排页签,横向平分面板宽度。ContextTabCount 是固定值(这轮只有"建筑"/
+    // "中间产品"两类,不是从数据读出来的分类数),不需要额外参数。
+    public static Rect2[] ContextPanelTabs(Rect2 panelRect)
+    {
+        var tabs = new Rect2[ContextTabCount];
+        float tabWidth = panelRect.Size.X / ContextTabCount;
+        for (int i = 0; i < ContextTabCount; i++)
+            tabs[i] = new Rect2(panelRect.Position + new Vector2(i * tabWidth, 0), new Vector2(tabWidth, ContextTabHeight));
+        return tabs;
+    }
+
+    // 页签下方的图标网格,固定 6 列,行数按 itemCount 往下长。这轮配方数量很少
+    // (个位数),不做滚动/裁剪——面板高度本来就跟背包面板展开到最大时对齐,够用。
+    public static Rect2[] ContextPanelGrid(Rect2 panelRect, int itemCount)
+    {
+        float contentWidth = panelRect.Size.X - PanelPadding * 2f;
+        float cell = (contentWidth - ContextCellGap * (ContextGridColumns - 1)) / ContextGridColumns;
+        float top = panelRect.Position.Y + ContextTabHeight + PanelPadding;
+
+        var result = new Rect2[itemCount];
+        for (int i = 0; i < itemCount; i++)
+        {
+            int r = i / ContextGridColumns, c = i % ContextGridColumns;
+            float x = panelRect.Position.X + PanelPadding + c * (cell + ContextCellGap);
+            float y = top + r * (cell + ContextCellGap);
+            result[i] = new Rect2(new Vector2(x, y), new Vector2(cell, cell));
+        }
+        return result;
     }
 
     // ---- 小地图占位 ----
