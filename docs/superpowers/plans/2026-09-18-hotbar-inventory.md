@@ -239,8 +239,16 @@ public static class HotbarLayout
     }
 
     // 返回当前可见的格子矩形(已裁剪到面板高度内),scrollOffsetRows 是滚动了多少整行
-    // (含小数——允许半行滚动,视觉更顺滑)。visibleRowCount 是这次实际画出了几整行,
-    // 调用方用它 + scrollOffsetRows 反推每个数组下标对应的真实 slotIndex。
+    // (含小数——允许半行滚动,视觉更顺滑)。visibleRowCount 是这次**实际**发出了几行
+    // (不是估算上限)——调用方用它 + scrollOffsetRows 反推每个数组下标对应的真实
+    // slotIndex 时,必须逐行连续、不能有被跳过的中间行,否则下标会错位(这是这份
+    // 函数唯一必须维护的契约:数组前 N 行必须依次对应 firstRow, firstRow+1, ...,
+    // 不能因为某一行"部分裁剪"就整行跳过——那样会让调用方以为第 0 行对应 firstRow,
+    // 实际上却是 firstRow+1,后续所有点击命中判定都会错位一整行)。
+    // 顶部一行哪怕因为滚动分数被裁掉一点点(至多 CellGap 那么几像素),也照样整行发出——
+    // 允许极轻微地画出面板标题区之下、正文区之上那一丝丝(不做真正的裁剪矩形/scissor,
+    // 这点视觉溢出可以接受);底部则相反,一旦某一行整体已经落在可视区域下边界之外,
+    // 后面的行(y 单调递增)必然也在外面,直接 break,不再继续。
     public static Rect2[] InventoryGrid(Rect2 panelRect, int slotCount, int columnCount, float scrollOffsetRows, out int visibleRowCount)
     {
         float contentWidth = panelRect.Size.X - PanelPadding * 2f;
@@ -248,20 +256,22 @@ public static class HotbarLayout
         float rowH = cell + CellGap;
 
         float gridTop = panelRect.Position.Y + HeaderHeight + PanelPadding;
-        float gridHeight = panelRect.Position.Y + panelRect.Size.Y - PanelPadding - gridTop;
-        visibleRowCount = Mathf.Max(0, Mathf.FloorToInt(gridHeight / rowH) + 1);   // +1: 允许最后一行被裁掉一部分,仍要画(裁剪靠调用方跳过越界)
+        float gridBottom = panelRect.Position.Y + panelRect.Size.Y - PanelPadding;
 
         int totalRows = Mathf.CeilToInt(slotCount / (float)columnCount);
         int firstRow = Mathf.FloorToInt(scrollOffsetRows);
         float subRowOffsetPx = (scrollOffsetRows - firstRow) * rowH;
 
-        var result = new System.Collections.Generic.List<Rect2>(visibleRowCount * columnCount);
-        for (int r = 0; r < visibleRowCount; r++)
+        var result = new System.Collections.Generic.List<Rect2>();
+        int emittedRows = 0;
+        for (int r = 0; ; r++)
         {
             int row = firstRow + r;
             if (row >= totalRows) break;
             float y = gridTop + r * rowH - subRowOffsetPx;
-            if (y + cell < gridTop || y > gridTop + gridHeight) continue;   // 完全在裁剪区外,跳过
+            if (y > gridBottom) break;   // 这一行(及之后所有行,y 单调递增)已经整体落在可视区域下方
+
+            emittedRows++;
             for (int c = 0; c < columnCount; c++)
             {
                 int slotIndex = row * columnCount + c;
@@ -270,6 +280,7 @@ public static class HotbarLayout
                 result.Add(new Rect2(new Vector2(x, y), new Vector2(cell, cell)));
             }
         }
+        visibleRowCount = emittedRows;
         return result.ToArray();
     }
 
