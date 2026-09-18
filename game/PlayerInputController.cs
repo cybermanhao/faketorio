@@ -10,7 +10,9 @@ namespace Faketorio.Game;
 /// sim 的 MovePlayer 是**持久状态**(设 Walking+WalkDir),不是每 tick 脉冲 ——
 /// 所以只在解析出的方向变化 / 起步 / 停步时发命令,不每帧发。
 ///
-/// 手挖(Task 3 加):按住 player_mine → 对光标格 MineStart/MineStop。
+/// 手挖(原来按住 E 键触发)已下线——`E` 键改绑给背包面板开关(见
+/// `BuildController.cs`),挖矿/拆除统一由长按右键覆盖(`BuildController.UpdateDemolish`,
+/// 走同一套 MineStart/MineStop sim 命令,对矿脉和可拆实体都生效,行为完全等价)。
 public partial class PlayerInputController : Node
 {
     private SimHost _host = null!;
@@ -18,9 +20,6 @@ public partial class PlayerInputController : Node
 
     // 上一次发给 sim 的方向。-1 = 已发 StopPlayer(或初始态),不会重复发 Stop。
     private int _lastSentDir = -1;
-
-    private bool _mineHeld;
-    private (int X, int Y) _mineTile;
 
     public override void _Ready()
     {
@@ -31,7 +30,6 @@ public partial class PlayerInputController : Node
     public override void _Process(double delta)
     {
         UpdateMovement();
-        UpdateMining();
     }
 
     private void UpdateMovement()
@@ -57,33 +55,6 @@ public partial class PlayerInputController : Node
         {
             _host.Submit(new Command { Type = CommandType.StopPlayer });
             _lastSentDir = -1;
-        }
-    }
-
-    // 按住 player_mine → 对光标格 MineStart;光标格变了重发(sim 的 SetMineTarget 幂等,
-    // 仅在格变化时清零进度);松开发 MineStop。仅 Follow 模式;进 Free 模式若正在挖则收尾。
-    // 不判 reach / 有没有矿 —— sim 的 PlayerMine() 自己会 no-op。
-    private void UpdateMining()
-    {
-        if (_cam.Mode != CameraMode.Follow)
-        {
-            if (_mineHeld) { _host.Submit(new Command { Type = CommandType.MineStop }); _mineHeld = false; }
-            return;
-        }
-
-        bool held = Input.IsActionPressed("player_mine");
-        if (!held)
-        {
-            if (_mineHeld) { _host.Submit(new Command { Type = CommandType.MineStop }); _mineHeld = false; }
-            return;
-        }
-
-        var (cx, cy) = _cam.WorldXform.ScreenToTile(GetViewport().GetMousePosition().ToCore());
-        if (!_mineHeld || (cx, cy) != _mineTile)
-        {
-            _host.Submit(new Command { Type = CommandType.MineStart, X = cx, Y = cy });
-            _mineHeld = true;
-            _mineTile = (cx, cy);
         }
     }
 }

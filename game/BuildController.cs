@@ -89,7 +89,7 @@ public partial class BuildController : Node
                 GetViewport().SetInputAsHandled();
                 return;
             }
-            if (key.Keycode == Key.Tab)
+            if (key.Keycode == Key.E)
             {
                 InventoryOpen = !InventoryOpen;
                 GetViewport().SetInputAsHandled();
@@ -305,8 +305,10 @@ public partial class BuildController : Node
         return true;
     }
 
-    // 长按右键 = 拆除——复用手挖(MineStart/MineStop)同一套 sim 逻辑(距离检查 +
-    // 进度累积 + minableResult 物品归还),不新写机制,同 PlayerInputController.UpdateMining()。
+    // 长按右键 = 挖矿/拆除——复用 MineStart/MineStop 同一套 sim 逻辑(距离检查 +
+    // 进度累积 + minableResult 物品归还),对矿脉和可拆实体都生效。原来 PlayerInputController
+    // 还有一条按住 E 键的手挖输入路径,走的是同一个 sim 命令;E 键现在改绑给背包开关,
+    // 那条输入路径已下线,长按右键是唯一入口。
     private void UpdateDemolish()
     {
         bool held = Input.IsMouseButtonPressed(MouseButton.Right);
