@@ -575,10 +575,7 @@ git commit -m "feat(game): 快捷栏状态+输入 —— 多组选槽/旋转/翻
 
 - [ ] **Step 3: 拖拽开始——鼠标左键在背包格上按下**
 
-在左键分支里、Task 3 Step 3 写的"快捷栏槽位命中判定"之后、"左键建造"之前，插入背包格命中判定（只在 `InventoryOpen` 时生效）：
-
-```csharp
-`cellRects` 数组下标不能简单假设"每行固定 20 个"——`HotbarLayout.InventoryGrid` 在最后一行 `slotIndex >= slotCount` 时会提前截断，行内实际格子数可能小于 20，所以命中判定要按行展开逐格核对真实 `slotIndex`，不能用 `firstRow * 20 + i` 这种简化下标换算：
+在左键分支里、Task 3 Step 3 写的"快捷栏槽位命中判定"之后、"左键建造"之前，插入背包格命中判定（只在 `InventoryOpen` 时生效）。`cellRects` 数组下标不能简单假设"每行固定 20 个"——`HotbarLayout.InventoryGrid` 在最后一行 `slotIndex >= slotCount` 时会提前截断，行内实际格子数可能小于 20，所以命中判定要按行展开逐格核对真实 `slotIndex`，不能用 `firstRow * 20 + i` 这种简化下标换算：
 
 ```csharp
             if (InventoryOpen)
