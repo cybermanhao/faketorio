@@ -31,6 +31,14 @@ public partial class BuildController : Node
     public bool InventoryOpen { get; private set; }
     public IReadOnlyList<int[]> HotbarGroups => _hotbarGroups;
 
+    // ---- 背包面板状态 ----
+    public float PanelHeightFraction { get; private set; } = 1f;
+    public float ScrollOffsetRows { get; private set; }
+    public int? DragItemProtoId { get; private set; }
+    public Vector2 DragScreenPos { get; private set; }
+
+    private bool _resizingPanel;
+
     private readonly List<int[]> _hotbarGroups = new();
 
     internal const float GroupPanelItemHeight = 22f;
@@ -81,8 +89,82 @@ public partial class BuildController : Node
                 GetViewport().SetInputAsHandled();
                 return;
             }
+            if (key.Keycode == Key.Tab)
+            {
+                InventoryOpen = !InventoryOpen;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
         }
 
+        if (e is InputEventMouseMotion mm && DragItemProtoId.HasValue)
+        {
+            DragScreenPos = mm.Position;
+        }
+
+        if (_resizingPanel && e is InputEventMouseMotion rmm)
+        {
+            var viewportForResize = GetViewport().GetVisibleRect().Size;
+            var panelForResize = HotbarLayout.InventoryPanel(viewportForResize, 1f);
+            float delta = -rmm.Relative.Y / Mathf.Max(1f, panelForResize.Size.Y);
+            PanelHeightFraction = Mathf.Clamp(PanelHeightFraction + delta, 0f, 1f);
+        }
+
+        if (InventoryOpen && e is InputEventMouseButton wheel && wheel.Pressed
+            && (wheel.ButtonIndex == MouseButton.WheelUp || wheel.ButtonIndex == MouseButton.WheelDown))
+        {
+            var viewport = GetViewport().GetVisibleRect().Size;
+            var invPanel = HotbarLayout.InventoryPanel(viewport, PanelHeightFraction);
+            if (invPanel.HasPoint(wheel.Position))
+            {
+                int totalRows = Mathf.CeilToInt(_host.Sim.Player.Inventory.SlotCount / 20f);
+                HotbarLayout.InventoryGrid(invPanel, _host.Sim.Player.Inventory.SlotCount, 20, ScrollOffsetRows, out int visibleRowsForScroll);
+                float maxScroll = Mathf.Max(0, totalRows - visibleRowsForScroll);
+                float dir = wheel.ButtonIndex == MouseButton.WheelDown ? 1f : -1f;
+                ScrollOffsetRows = Mathf.Clamp(ScrollOffsetRows + dir, 0f, maxScroll);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
+        if (e is InputEventMouseButton relb && !relb.Pressed)
+        {
+            if (relb.ButtonIndex == MouseButton.Left && _resizingPanel)
+            {
+                _resizingPanel = false;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            if (relb.ButtonIndex == MouseButton.Left && DragItemProtoId.HasValue)
+            {
+                int dragged = DragItemProtoId.Value;
+                DragItemProtoId = null;   // 无论落在哪都先清空拖拽状态,下面只是决定要不要真的绑定
+
+                var protos = _host.Sim.Prototypes;
+                var itemProto = protos.GetById(dragged) as ItemPrototype;
+                bool bindable = itemProto?.PlaceResult is not null && protos.TryGetEntityByName(itemProto.PlaceResult, out _);
+
+                if (bindable)
+                {
+                    var viewport = GetViewport().GetVisibleRect().Size;
+                    var rects = HotbarLayout.HotbarRow(viewport, HotbarLayout.SlotsPerGroup);
+                    for (int i = 0; i < rects.Slots.Length; i++)
+                    {
+                        if (rects.Slots[i].HasPoint(relb.Position))
+                        {
+                            _hotbarGroups[ActiveGroup][i] = dragged;
+                            break;
+                        }
+                    }
+                }
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
+        // 到这里,剩下的只可能是"按下"事件——所有"松开"事件(拖拽释放/resize 结束)
+        // 都已经在上面处理并 return 掉了。
         if (e is not InputEventMouseButton mb || !mb.Pressed) return;
 
         if (mb.ButtonIndex == MouseButton.Left)
@@ -112,6 +194,64 @@ public partial class BuildController : Node
                     return;
                 }
             }
+
+            if (InventoryOpen)
+            {
+                var invPanel = HotbarLayout.InventoryPanel(viewport, PanelHeightFraction);
+                var inv = _host.Sim.Player.Inventory;
+                var cellRects = HotbarLayout.InventoryGrid(invPanel, inv.SlotCount, 20, ScrollOffsetRows, out int visibleRows);
+                int firstRow = Mathf.FloorToInt(ScrollOffsetRows);
+
+                int idx = 0;
+                bool hitCell = false;
+                for (int r = 0; r < visibleRows && !hitCell; r++)
+                {
+                    int row = firstRow + r;
+                    for (int c = 0; c < 20; c++)
+                    {
+                        int slotIndex = row * 20 + c;
+                        if (slotIndex >= inv.SlotCount || idx >= cellRects.Length) break;
+                        if (cellRects[idx].HasPoint(mb.Position))
+                        {
+                            var stack = inv[slotIndex];
+                            if (!stack.IsEmpty) DragItemProtoId = stack.ItemProtoId;   // 空格不开始拖拽,DragItemProtoId 保持 null
+                            hitCell = true;
+                            break;
+                        }
+                        idx++;
+                    }
+                }
+                if (hitCell)
+                {
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+
+                var handle = HotbarLayout.ResizeHandle(invPanel);
+                if (handle.HasPoint(mb.Position))
+                {
+                    _resizingPanel = true;
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+
+                if (invPanel.HasPoint(mb.Position))
+                {
+                    // 点在面板空白处(不是格子也不是 handle):不建造,直接吃掉这次点击。
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+
+            int boundItemId = _hotbarGroups[ActiveGroup][SelectedSlot];
+            if (boundItemId >= 0)
+            {
+                var (x, y) = _cam.WorldXform.ScreenToTile(mb.Position.ToCore());
+                _host.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = boundItemId, X = x, Y = y, Rotation = SelectedRotation });
+            }
+
+            GetViewport().SetInputAsHandled();
+            return;
         }
 
         if (mb.ButtonIndex == MouseButton.Middle)
@@ -128,17 +268,6 @@ public partial class BuildController : Node
                 }
             }
         }
-
-        if (mb.ButtonIndex != MouseButton.Left) return;
-
-        int boundItemId = _hotbarGroups[ActiveGroup][SelectedSlot];
-        if (boundItemId >= 0)
-        {
-            var (x, y) = _cam.WorldXform.ScreenToTile(mb.Position.ToCore());
-            _host.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = boundItemId, X = x, Y = y, Rotation = SelectedRotation });
-        }
-
-        GetViewport().SetInputAsHandled();
     }
 
     private static int? DigitKeyToSlot(Key k) => k switch
