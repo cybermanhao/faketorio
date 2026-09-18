@@ -92,9 +92,11 @@ public class BenchScenarioTests
     // 已有的其它行为改动叠加)跟 P16 分支自己原来记的锚点不一样,用 dotnet test
     // 实测的失败断言输出回填。
     //
-    // 四次 re-baseline(Task 1 扩充玩家背包 60→200):玩家库存大小变化导致 Inventory.WriteState
-    // 序列化字节数增加,所有 tick 的状态哈希都改变。这是数据变更导致的预期行为改动。
-    private const ulong GOLDEN_TICK_800 = 10659014672853988627UL;
+    // 四次 re-baseline(Task 1 扩充玩家背包 60→200)后来又撤销了(用户体验反馈后把
+    // 背包容量改回 60),锚点值回到撤销前的原值 11349148617429990271UL——
+    // 玩家库存大小变化(不管是扩大还是改回来)都会让 Inventory.WriteState 序列化
+    // 字节数变化,所有 tick 的状态哈希都跟着变;这次是撤销数据变更,锚点值也跟着撤销。
+    private const ulong GOLDEN_TICK_800 = 11349148617429990271UL;
 
     [Fact]
     public void Runner_SelfTest_Passes()
