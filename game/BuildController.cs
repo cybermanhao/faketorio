@@ -1,10 +1,12 @@
+using System;
+using System.Collections.Generic;
 using Godot;
 using Faketorio.Sim.Commands;
 using Faketorio.Sim.Prototypes;
 
 namespace Faketorio.Game;
 
-/// 最小放置命令:左键放硬编码 proto(木箱),右键拆。无 UI。
+/// 最小放置命令:左键放快捷栏选中槽绑定的物品,右键拆。无 UI。
 /// 只读 sim + Submit,不直接改任何 sim 状态。
 ///
 /// 拒绝检测:命令要到下一次 Sim.Step()(在 SimHost._Process 里)才 apply,
@@ -16,18 +18,36 @@ public partial class BuildController : Node
 
     private SimHost _host = null!;
     private CameraController _cam = null!;
-    private int _chestItemProtoId;
     private int _rejectedSeen;
     private double _flashRemaining;
     private bool _demolishHeld;
     private (int X, int Y) _demolishTile;
 
+    // ---- 快捷栏状态 ----
+    public int ActiveGroup { get; private set; }
+    public int SelectedSlot { get; private set; }
+    public byte SelectedRotation { get; private set; }
+    public bool GroupPanelExpanded { get; private set; }
+    public bool InventoryOpen { get; private set; }
+    public IReadOnlyList<int[]> HotbarGroups => _hotbarGroups;
+
+    private readonly List<int[]> _hotbarGroups = new();
+
+    internal const float GroupPanelItemHeight = 22f;
+
+    private int[] NewEmptyGroup()
+    {
+        var g = new int[HotbarLayout.SlotsPerGroup];
+        Array.Fill(g, -1);
+        return g;
+    }
+
     public override void _Ready()
     {
         _host = GetNode<SimHost>("/root/SimHost");
         _cam = GetNode<CameraController>("../CameraController");
-        _chestItemProtoId = _host.Sim.Prototypes.Get<ItemPrototype>("wooden-chest").Id;
         _rejectedSeen = _host.Sim.RejectedCommandCount;
+        _hotbarGroups.Add(NewEmptyGroup());
     }
 
     public override void _Process(double delta)
@@ -46,13 +66,114 @@ public partial class BuildController : Node
 
     public override void _UnhandledInput(InputEvent e)
     {
+        if (e is InputEventKey { Pressed: true, Echo: false } key)
+        {
+            int? slot = DigitKeyToSlot(key.Keycode);
+            if (slot is int s)
+            {
+                SelectedSlot = s;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+            if (key.Keycode == Key.R)
+            {
+                SelectedRotation = (byte)((SelectedRotation + 1) % 4);
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+        }
+
         if (e is not InputEventMouseButton mb || !mb.Pressed) return;
+
+        if (mb.ButtonIndex == MouseButton.Left)
+        {
+            var viewport = GetViewport().GetVisibleRect().Size;
+            var rects = HotbarLayout.HotbarRow(viewport, HotbarLayout.SlotsPerGroup);
+
+            if (rects.PageButton.HasPoint(mb.Position))
+            {
+                GroupPanelExpanded = !GroupPanelExpanded;
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            if (GroupPanelExpanded && HandleGroupPanelClick(mb.Position, rects.PageButton))
+            {
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
+            for (int i = 0; i < rects.Slots.Length; i++)
+            {
+                if (rects.Slots[i].HasPoint(mb.Position))
+                {
+                    SelectedSlot = i;
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+        }
+
+        if (mb.ButtonIndex == MouseButton.Middle)
+        {
+            var viewport = GetViewport().GetVisibleRect().Size;
+            var rects = HotbarLayout.HotbarRow(viewport, HotbarLayout.SlotsPerGroup);
+            for (int i = 0; i < rects.Slots.Length; i++)
+            {
+                if (rects.Slots[i].HasPoint(mb.Position))
+                {
+                    _hotbarGroups[ActiveGroup][i] = -1;
+                    GetViewport().SetInputAsHandled();
+                    return;
+                }
+            }
+        }
+
         if (mb.ButtonIndex != MouseButton.Left) return;
 
-        var (x, y) = _cam.WorldXform.ScreenToTile(mb.Position.ToCore());
-        _host.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = _chestItemProtoId, X = x, Y = y });
+        int boundItemId = _hotbarGroups[ActiveGroup][SelectedSlot];
+        if (boundItemId >= 0)
+        {
+            var (x, y) = _cam.WorldXform.ScreenToTile(mb.Position.ToCore());
+            _host.Submit(new Command { Type = CommandType.BuildFromInventory, ProtoId = boundItemId, X = x, Y = y, Rotation = SelectedRotation });
+        }
 
         GetViewport().SetInputAsHandled();
+    }
+
+    private static int? DigitKeyToSlot(Key k) => k switch
+    {
+        Key.Key1 => 0, Key.Key2 => 1, Key.Key3 => 2, Key.Key4 => 3, Key.Key5 => 4,
+        Key.Key6 => 5, Key.Key7 => 6, Key.Key8 => 7, Key.Key9 => 8, Key.Key0 => 9,
+        _ => null,
+    };
+
+    // 展开的分组列表点在了哪一项——是就处理(切组/新建)并返回 true;点在列表范围外返回 false
+    // (调用方据此决定是否收起面板;这里保持简单,点哪儿都直接处理完就收起)。
+    private bool HandleGroupPanelClick(Vector2 pos, Rect2 pageButton)
+    {
+        int itemCount = _hotbarGroups.Count + 1;   // 最后一项是"+ 新建"
+        var panelRect = new Rect2(
+            pageButton.Position - new Vector2(0, itemCount * GroupPanelItemHeight),
+            new Vector2(pageButton.Size.X, itemCount * GroupPanelItemHeight));
+
+        if (!panelRect.HasPoint(pos)) return false;
+
+        int index = (int)((pos.Y - panelRect.Position.Y) / GroupPanelItemHeight);
+        if (index < 0 || index >= itemCount) return false;
+
+        if (index == _hotbarGroups.Count)
+        {
+            _hotbarGroups.Add(NewEmptyGroup());
+            ActiveGroup = _hotbarGroups.Count - 1;
+        }
+        else
+        {
+            ActiveGroup = index;
+        }
+        SelectedSlot = 0;
+        GroupPanelExpanded = false;
+        return true;
     }
 
     // 长按右键 = 拆除——复用手挖(MineStart/MineStop)同一套 sim 逻辑(距离检查 +
