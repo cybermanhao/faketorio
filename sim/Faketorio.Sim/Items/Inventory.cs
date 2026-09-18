@@ -104,6 +104,44 @@ public sealed class Inventory
         return total;
     }
 
+    // 玩家背包内部拖拽/点选(移动/堆叠/交换)的唯一实现——三种情况统一一个方法:
+    // 目标槽空 → 整个源槽搬过去(源槽清空);目标槽跟源槽同类 → 按 stackSizeAtTarget
+    // 合并尽量多,搬不完的留在源槽(源槽可能变空也可能留有剩余);目标槽是别的物品
+    // → 整槽互换。fromSlot == toSlot 直接 no-op(同槽"合并到自己"会把数量算重复,
+    // 必须在合并逻辑前挡掉)。ReadOnly 不检查——这个方法只服务玩家自己的背包,
+    // 调用方(Simulation)保证目标就是 Player.Inventory,不会传只读库存进来。
+    public void MoveOrMergeSlot(int fromSlot, int toSlot, int stackSizeAtTarget)
+    {
+        if (fromSlot == toSlot) return;
+
+        var from = _slots[fromSlot];
+        if (from.IsEmpty) return;   // 源槽是空的,没什么好搬的
+
+        var to = _slots[toSlot];
+
+        if (to.IsEmpty)
+        {
+            _slots[toSlot] = from;
+            _slots[fromSlot] = ItemStack.Empty;
+            return;
+        }
+
+        if (to.ItemProtoId == from.ItemProtoId)
+        {
+            int space = stackSizeAtTarget - to.Count;
+            int moved = space < from.Count ? space : from.Count;
+            if (moved < 0) moved = 0;   // 目标已经溢出(理论上不该发生),别倒扣
+            _slots[toSlot] = new ItemStack(to.ItemProtoId, to.Count + moved);
+            int remaining = from.Count - moved;
+            _slots[fromSlot] = remaining > 0 ? new ItemStack(from.ItemProtoId, remaining) : ItemStack.Empty;
+            return;
+        }
+
+        // 不同物品类型:整槽交换
+        _slots[fromSlot] = to;
+        _slots[toSlot] = from;
+    }
+
     // 所有非空槽的 Count 之和(拆箱返回用)。
     public int TotalItems()
     {

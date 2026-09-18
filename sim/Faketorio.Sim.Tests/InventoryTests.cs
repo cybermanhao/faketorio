@@ -250,4 +250,82 @@ public class InventoryTests
         inv.CanInsert(Iron, 40, Stack);
         Assert.Equal(h, Hash(inv));
     }
+
+    [Fact]
+    public void MoveOrMergeSlot_TargetEmpty_MovesWholeStack_SourceBecomesEmpty()
+    {
+        var inv = new Inventory(4);
+        inv.Insert(Iron, 30, Stack);   // slot 0
+        inv.MoveOrMergeSlot(0, 1, Stack);
+        Assert.True(inv[0].IsEmpty);
+        Assert.Equal(new ItemStack(Iron, 30), inv[1]);
+    }
+
+    [Fact]
+    public void MoveOrMergeSlot_SameItemType_MergesUpToStackSize_LeavesOverflowInSource()
+    {
+        var inv = new Inventory(4);
+        inv.Insert(Iron, 70, Stack);     // slot 0 -> 50 (full), slot 1 -> 20 (overflow)
+        inv.Remove(Iron, 10);            // drains front-to-back: slot 0 -> 40, slot 1 stays 20
+        Assert.Equal(new ItemStack(Iron, 40), inv[0]);
+        Assert.Equal(new ItemStack(Iron, 20), inv[1]);
+
+        inv.MoveOrMergeSlot(1, 0, Stack);   // 20 -> merge into the 40 (space = 10)
+
+        Assert.Equal(new ItemStack(Iron, 50), inv[0]);   // topped up to stackSize
+        Assert.Equal(new ItemStack(Iron, 10), inv[1]);   // overflow stays in source
+    }
+
+    [Fact]
+    public void MoveOrMergeSlot_SameItemType_FitsEntirely_SourceBecomesEmpty()
+    {
+        // Insert always tops up an existing same-type slot before starting a new one, so the
+        // only way to get two independently-small Iron slots through the public API is:
+        // fill slot 0 to capacity, let the second Insert spill into slot 1, then drain slot 0
+        // back down via Remove (which drains front-to-back) — leaving two small partial slots.
+        var inv = new Inventory(3);
+        inv.Insert(Iron, Stack, Stack);   // slot 0 -> 50 (full)
+        inv.Insert(Iron, 5, Stack);       // slot 0 full, second loop picks slot 1 -> 5
+        inv.Remove(Iron, 45);             // drains slot 0 first: slot 0 -> 5, slot 1 stays 5
+        Assert.Equal(new ItemStack(Iron, 5), inv[0]);
+        Assert.Equal(new ItemStack(Iron, 5), inv[1]);
+
+        inv.MoveOrMergeSlot(1, 0, Stack);   // 5 + 5 = 10, fits entirely under stackSize 50
+
+        Assert.Equal(new ItemStack(Iron, 10), inv[0]);
+        Assert.True(inv[1].IsEmpty);
+    }
+
+    [Fact]
+    public void MoveOrMergeSlot_DifferentItemTypes_SwapsBothSlots()
+    {
+        var inv = new Inventory(4);
+        inv.Insert(Iron, 12, Stack);     // slot 0
+        inv.Insert(Copper, 7, Stack);    // slot 1
+
+        inv.MoveOrMergeSlot(0, 1, Stack);
+
+        Assert.Equal(new ItemStack(Copper, 7), inv[0]);
+        Assert.Equal(new ItemStack(Iron, 12), inv[1]);
+    }
+
+    [Fact]
+    public void MoveOrMergeSlot_SameSlot_NoOp()
+    {
+        var inv = new Inventory(4);
+        inv.Insert(Iron, 10, Stack);
+        var h = Hash(inv);
+        inv.MoveOrMergeSlot(0, 0, Stack);
+        Assert.Equal(h, Hash(inv));
+    }
+
+    [Fact]
+    public void MoveOrMergeSlot_EmptySource_NoOp()
+    {
+        var inv = new Inventory(4);
+        inv.Insert(Iron, 10, Stack);   // slot 0 occupied, slot 1 empty
+        var h = Hash(inv);
+        inv.MoveOrMergeSlot(1, 0, Stack);   // source (slot 1) is empty
+        Assert.Equal(h, Hash(inv));
+    }
 }

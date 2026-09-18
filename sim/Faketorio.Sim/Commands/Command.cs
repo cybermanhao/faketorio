@@ -14,6 +14,9 @@ public enum CommandType : byte
     SetRecipe = 10,
     RotateEntity = 11,
     BuildFromInventory = 12,
+    MoveInventorySlot = 13,   // X = 源槽下标, Y = 目标槽下标(都是 Player.Inventory 的槽位);
+                               // 目标空 = 移动,同类 = 按 stackSize 合并(溢出留在源槽),
+                               // 异类 = 整体交换。玩家背包内部拖拽/点选操作的唯一入口。
 }
 
 public struct Command

@@ -410,6 +410,27 @@ public sealed class Simulation
                 CreateAndRegisterEntity(entityProto, entityProto.Id, command.X, command.Y, command.Rotation);
                 return;
             }
+            case CommandType.MoveInventorySlot:
+            {
+                var inv = Player.Inventory;
+                if (command.X < 0 || command.X >= inv.SlotCount || command.Y < 0 || command.Y >= inv.SlotCount
+                    || command.X == command.Y)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                var fromStack = inv[command.X];
+                if (fromStack.IsEmpty
+                    || !Prototypes.TryGetById(fromStack.ItemProtoId, out var moveItemP) || moveItemP is not ItemPrototype moveItemProto)
+                {
+                    RejectedCommandCount++;
+                    return;
+                }
+
+                inv.MoveOrMergeSlot(command.X, command.Y, moveItemProto.StackSize);
+                return;
+            }
             case CommandType.RemoveEntity:
             {
                 var id = World.GetEntityAt(command.X, command.Y);

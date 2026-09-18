@@ -2793,4 +2793,98 @@ public class SimulationTests
         Assert.Equal(3232, sim.Player.X);
         Assert.Equal(1 * St, sim.Player.Y);
     }
+
+    [Fact]
+    public void MoveInventorySlot_TargetEmpty_MovesWholeStack()
+    {
+        var sim = NewSim();
+        int coal = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int emptySlot = FindEmptySlot(sim);
+
+        int sourceSlot = FindSlotOf(sim, coal);
+        int before = sim.Player.Inventory[sourceSlot].Count;
+
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = sourceSlot, Y = emptySlot });
+        sim.Step();
+
+        Assert.Equal(0, RejectedDelta(sim));
+        Assert.True(sim.Player.Inventory[sourceSlot].IsEmpty);
+        Assert.Equal(coal, sim.Player.Inventory[emptySlot].ItemProtoId);
+        Assert.Equal(before, sim.Player.Inventory[emptySlot].Count);
+    }
+
+    // 合并/溢出/交换的具体数值计算已经在 sim/Faketorio.Sim.Tests/InventoryTests.cs 里用
+    // 干净可控的 Inventory(N) 实例直接测过(MoveOrMergeSlot_* 系列)——真实 Simulation 的
+    // Insert 有"先补同类槽"的自动合并规则,没法用它精确摆出两个独立的同类未满槽,勉强绕
+    // 反而让测试难读。这里只覆盖 Simulation 层的命令路由本身(校验/拒绝/委派到 Inventory),
+    // 不重复测 MoveOrMergeSlot 内部的合并算术。
+
+    [Fact]
+    public void MoveInventorySlot_OutOfBoundsOrSameSlot_Rejected()
+    {
+        var sim = NewSim();
+        int slotCount = sim.Player.Inventory.SlotCount;
+
+        int rejectedBefore = sim.RejectedCommandCount;
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = -1, Y = 0 });
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = 0, Y = slotCount });
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = 3, Y = 3 });
+        sim.Step();
+
+        Assert.Equal(rejectedBefore + 3, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void MoveInventorySlot_EmptySource_Rejected()
+    {
+        var sim = NewSim();
+        int emptyA = FindEmptySlot(sim);
+        int emptyB = FindEmptySlot(sim, exclude: emptyA);
+
+        int rejectedBefore = sim.RejectedCommandCount;
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = emptyA, Y = emptyB });
+        sim.Step();
+
+        Assert.Equal(rejectedBefore + 1, sim.RejectedCommandCount);
+    }
+
+    [Fact]
+    public void MoveInventorySlot_DifferentItemTypes_SwapsBothSlots()
+    {
+        var sim = NewSim();
+        int coalId = sim.Prototypes.Get<ItemPrototype>("coal").Id;
+        int plateId = sim.Prototypes.Get<ItemPrototype>("iron-plate").Id;
+
+        int coalSlot = FindSlotOf(sim, coalId);
+        int plateSlot = FindSlotOf(sim, plateId);
+        int coalCount = sim.Player.Inventory[coalSlot].Count;
+        int plateCount = sim.Player.Inventory[plateSlot].Count;
+
+        sim.Submit(new Command { Type = CommandType.MoveInventorySlot, X = coalSlot, Y = plateSlot });
+        sim.Step();
+
+        Assert.Equal(0, RejectedDelta(sim));
+        Assert.Equal(plateId, sim.Player.Inventory[coalSlot].ItemProtoId);
+        Assert.Equal(plateCount, sim.Player.Inventory[coalSlot].Count);
+        Assert.Equal(coalId, sim.Player.Inventory[plateSlot].ItemProtoId);
+        Assert.Equal(coalCount, sim.Player.Inventory[plateSlot].Count);
+    }
+
+    private static int RejectedDelta(Simulation sim) => sim.RejectedCommandCount;
+
+    private static int FindSlotOf(Simulation sim, int itemProtoId)
+    {
+        var inv = sim.Player.Inventory;
+        for (int i = 0; i < inv.SlotCount; i++)
+            if (inv[i].ItemProtoId == itemProtoId) return i;
+        throw new InvalidOperationException($"item {itemProtoId} not found in inventory");
+    }
+
+    private static int FindEmptySlot(Simulation sim, int exclude = -1)
+    {
+        var inv = sim.Player.Inventory;
+        for (int i = 0; i < inv.SlotCount; i++)
+            if (inv[i].IsEmpty && i != exclude) return i;
+        throw new InvalidOperationException("no empty slot found");
+    }
 }
