@@ -155,11 +155,22 @@ public static class HotbarLayout
     private const float ContextPanelWidthRatio = 0.32f;
     private const float PanelGap = 10f;
 
+    // 靠右贴齐:右边界卡在小地图左边缘往左留 PanelGap,不再跟着背包面板宽度走
+    // (背包面板变宽/变窄不该把手搓/蓝图面板往右边推得离小地图越来越近甚至压上去)。
+    // 如果窗口很窄导致算出来的左边界比背包面板右边界还靠左(两个面板会撞在一起),
+    // 退让为紧贴背包面板右侧——这时视觉上会变窄,是可接受的极端窗口降级行为,
+    // 跟 §4.2 背包面板本身的下限保护同一个思路。
     public static Rect2 ContextPanel(Vector2 viewportSize)
     {
         var inv = InventoryPanel(viewportSize, heightFraction: 1f);   // 高度跟背包面板展开到最大时对齐
+        var minimap = Minimap(viewportSize);
         float width = Mathf.Max(MinContextPanelWidth, viewportSize.X * ContextPanelWidthRatio);
-        float x = inv.Position.X + inv.Size.X + PanelGap;
+
+        float rightEdge = minimap.Position.X - PanelGap;
+        float x = rightEdge - width;
+        float minX = inv.Position.X + inv.Size.X + PanelGap;
+        if (x < minX) x = minX;
+
         return new Rect2(new Vector2(x, inv.Position.Y), new Vector2(width, inv.Size.Y));
     }
 
