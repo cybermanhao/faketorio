@@ -308,6 +308,191 @@ public partial class WorldView : Node2D
             DrawDebugBeltStructure(t, sim);
             DrawDebugCollisionBoxes(t, sim, vis);
         }
+
+        // 10. 快捷栏 + 背包/生产面板/小地图 —— 全部立即模式画,数据来自 BuildController
+        // 暴露的公开状态,这里只读不改(跟这个文件其它部分同一个零 mutation 原则)。
+        DrawHotbar(sim);
+        DrawMinimap();
+        if (_build.InventoryOpen)
+        {
+            DrawInventoryPanel(sim);
+            DrawContextPanel(sim);
+        }
+        DrawDragGhost(sim);
+    }
+
+    // 能建造的物品(有 PlaceResult 且能解析出实体)用它建成后的实体配色;
+    // 原材料/半成品(iron-plate、coal 等)沿用 RenderPalette.ForItem 的近白色。
+    private static Color ItemCellColor(int itemProtoId, PrototypeRegistry protos)
+    {
+        if (protos.GetById(itemProtoId) is ItemPrototype ip && ip.PlaceResult is not null
+            && protos.TryGetEntityByName(ip.PlaceResult, out var entityProto))
+        {
+            return RenderPalette.ForEntity(entityProto);
+        }
+        return RenderPalette.ForItem(itemProtoId);
+    }
+
+    private void DrawHotbar(Faketorio.Sim.Simulation sim)
+    {
+        var viewport = GetViewport().GetVisibleRect().Size;
+        var rects = HotbarLayout.HotbarRow(viewport, HotbarLayout.SlotsPerGroup);
+        var protos = sim.Prototypes;
+        var group = _build.HotbarGroups[_build.ActiveGroup];
+
+        // 页按钮
+        DrawRect(rects.PageButton, new Color(0.16f, 0.16f, 0.1f));
+        DrawRect(rects.PageButton, new Color(0.4f, 0.4f, 0.4f), false, 1.5f);
+        DrawString(ThemeDB.FallbackFont, rects.PageButton.Position + new Vector2(8, 28),
+                   (_build.ActiveGroup + 1).ToString(), HorizontalAlignment.Left, -1f, 14, new Color("#ffd24a"));
+
+        // 展开的分组列表
+        if (_build.GroupPanelExpanded)
+        {
+            int itemCount = _build.HotbarGroups.Count + 1;
+            var panelRect = new Rect2(
+                rects.PageButton.Position - new Vector2(0, itemCount * BuildController.GroupPanelItemHeight),
+                new Vector2(rects.PageButton.Size.X, itemCount * BuildController.GroupPanelItemHeight));
+            DrawRect(panelRect, new Color(0.12f, 0.12f, 0.08f, 0.95f));
+            DrawRect(panelRect, new Color(0.4f, 0.4f, 0.4f), false, 1f);
+            for (int i = 0; i < itemCount; i++)
+            {
+                var itemPos = panelRect.Position + new Vector2(0, i * BuildController.GroupPanelItemHeight);
+                string label = i == _build.HotbarGroups.Count ? "+" : (i + 1).ToString();
+                var color = i == _build.ActiveGroup ? new Color("#ffd24a") : new Color(0.85f, 0.85f, 0.85f);
+                DrawString(ThemeDB.FallbackFont, itemPos + new Vector2(8, 16), label,
+                           HorizontalAlignment.Left, -1f, 12, color);
+            }
+        }
+
+        // 10 个槽位
+        for (int i = 0; i < rects.Slots.Length; i++)
+        {
+            var r = rects.Slots[i];
+            int itemId = group[i];
+            bool selected = i == _build.SelectedSlot;
+
+            DrawRect(r, itemId < 0 ? new Color(0.1f, 0.1f, 0.1f, 0.6f) : ItemCellColor(itemId, protos));
+            DrawRect(r, selected ? new Color("#ffd24a") : new Color(0.4f, 0.4f, 0.4f),
+                     false, selected ? 2.5f : 1.5f);
+            DrawString(ThemeDB.FallbackFont, r.Position + new Vector2(2, 10), ((i + 1) % 10).ToString(),
+                       HorizontalAlignment.Left, -1f, 9, new Color("#ffd24a"));
+
+            if (selected)
+            {
+                // 右下角小箭头表示 SelectedRotation(复用 DrawOrientation 同款画法,缩小版)
+                var c = r.Position + r.Size - new Vector2(10, 10);
+                DrawOrientation(c - new Vector2(6, 6), new Vector2(12, 12), _build.SelectedRotation);
+            }
+        }
+
+        // 2x3 快捷操作占位(纯占位,不接功能)
+        foreach (var r in rects.QuickActions)
+        {
+            DrawRect(r, new Color(0.1f, 0.1f, 0.1f, 0.4f));
+            DrawRect(r, new Color(0.35f, 0.35f, 0.35f), false, 1f, antialiased: false);
+        }
+    }
+
+    private void DrawInventoryPanel(Faketorio.Sim.Simulation sim)
+    {
+        var viewport = GetViewport().GetVisibleRect().Size;
+        var panel = HotbarLayout.InventoryPanel(viewport, _build.PanelHeightFraction);
+        var inv = sim.Player.Inventory;
+        var protos = sim.Prototypes;
+
+        DrawRect(panel, new Color(0.14f, 0.12f, 0.08f, 0.95f));
+        DrawRect(panel, new Color(0.35f, 0.29f, 0.16f), false, 1.5f);
+        DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(8, 16), "背包",
+                   HorizontalAlignment.Left, -1f, 13, new Color("#e8d9a8"));
+
+        var handle = HotbarLayout.ResizeHandle(panel);
+        DrawRect(handle, new Color(0.35f, 0.29f, 0.16f));
+
+        var cellRects = HotbarLayout.InventoryGrid(panel, inv.SlotCount, 20, _build.ScrollOffsetRows, out int visibleRows);
+        int firstRow = Mathf.FloorToInt(_build.ScrollOffsetRows);
+        int idx = 0;
+        for (int r = 0; r < visibleRows; r++)
+        {
+            int row = firstRow + r;
+            for (int c = 0; c < 20; c++)
+            {
+                int slotIndex = row * 20 + c;
+                if (slotIndex >= inv.SlotCount || idx >= cellRects.Length) goto Done;
+                var rect = cellRects[idx];
+                var stack = inv[slotIndex];
+
+                DrawRect(rect, stack.IsEmpty ? new Color(0.08f, 0.08f, 0.06f, 0.5f) : ItemCellColor(stack.ItemProtoId, protos));
+                DrawRect(rect, new Color(0.3f, 0.27f, 0.2f), false, 1f);
+                if (!stack.IsEmpty)
+                    DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(1, rect.Size.Y - 1), stack.Count.ToString(),
+                               HorizontalAlignment.Left, rect.Size.X, 8, Colors.White);
+                idx++;
+            }
+        }
+        Done: ;
+    }
+
+    private void DrawContextPanel(Faketorio.Sim.Simulation sim)
+    {
+        var viewport = GetViewport().GetVisibleRect().Size;
+        var panel = HotbarLayout.ContextPanel(viewport);
+
+        DrawRect(panel, new Color(0.10f, 0.13f, 0.16f, 0.95f));
+        DrawRect(panel, new Color(0.2f, 0.29f, 0.35f), false, 1.5f);
+
+        if (_cam.Mode == CameraMode.Free)
+        {
+            DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(8, 16), "蓝图面板",
+                       HorizontalAlignment.Left, -1f, 13, new Color("#a8d9e8"));
+            DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(8, 40), "蓝图系统待建,见 roadmap",
+                       HorizontalAlignment.Left, panel.Size.X - 16, 11, new Color(0.7f, 0.7f, 0.7f));
+            return;
+        }
+
+        DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(8, 16), "手搓面板",
+                   HorizontalAlignment.Left, -1f, 13, new Color("#a8d9e8"));
+
+        var protos = sim.Prototypes;
+        float y = panel.Position.Y + 34;
+        const float rowH = 20f;
+        for (int id = 0; id < protos.Count; id++)
+        {
+            if (protos.GetById(id) is not RecipePrototype recipe || recipe.Category != "crafting") continue;
+            if (y + rowH > panel.Position.Y + panel.Size.Y) break;   // 面板画不下更多了,直接停(这轮不做滚动)
+
+            var swatchRect = new Rect2(panel.Position.X + 8, y, 14, 14);
+            var color = recipe.ResolvedResults.Count > 0 ? ItemCellColor(recipe.ResolvedResults[0].ItemProtoId, protos) : new Color(0.5f, 0.5f, 0.5f);
+            DrawRect(swatchRect, color);
+            DrawString(ThemeDB.FallbackFont, panel.Position + new Vector2(28, y + 12), recipe.Name,
+                       HorizontalAlignment.Left, panel.Size.X - 36, 10, new Color(0.85f, 0.85f, 0.85f));
+            y += rowH;
+        }
+    }
+
+    private void DrawMinimap()
+    {
+        var viewport = GetViewport().GetVisibleRect().Size;
+        var r = HotbarLayout.Minimap(viewport);
+        DrawRect(r, new Color(0.05f, 0.06f, 0.04f, 0.85f));
+        DrawRect(r, new Color(0.35f, 0.35f, 0.5f), false, 1f);
+        DrawString(ThemeDB.FallbackFont, r.Position + new Vector2(8, r.Size.Y / 2), "小地图(占位)",
+                   HorizontalAlignment.Left, r.Size.X - 16, 9, new Color(0.5f, 0.5f, 0.6f));
+    }
+
+    private void DrawDragGhost(Faketorio.Sim.Simulation sim)
+    {
+        if (!_build.DragItemProtoId.HasValue) return;
+        int itemId = _build.DragItemProtoId.Value;
+        var proto = sim.Prototypes.GetById(itemId);
+        var color = ItemCellColor(itemId, sim.Prototypes);
+
+        var size = new Vector2(36, 36);
+        var rect = new Rect2(_build.DragScreenPos - size / 2f, size);
+        DrawRect(rect, color, true);
+        DrawRect(rect, new Color("#ffd24a"), false, 2f);
+        DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(2, size.Y - 4), proto.Name,
+                   HorizontalAlignment.Left, size.X - 4, 7, Colors.White);
     }
 
     // 沿 rot(0/1/2/3 = N/E/S/W)方向画 3 个 ">" 雪佛龙。center 是 belt 格中心(屏幕像素)。
